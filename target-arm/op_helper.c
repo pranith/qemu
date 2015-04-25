@@ -29,7 +29,7 @@
 
 #include "qsim-context.h"
 #include "qsim-arm-regs.h"
-
+#include "qsim-arm64-regs.h"
 
 extern qsim_ucontext_t qemu_context;
 extern qsim_ucontext_t main_context;
@@ -1018,7 +1018,7 @@ void HELPER(inst_callback)(uint32_t vaddr, uint32_t length, uint32_t type)
 	return;
 }
 
-static inline void memop_callback(uint32_t addr, uint32_t size, int type)
+static inline void memop_callback(uint64_t addr, uint32_t size, int type)
 {
 	if (qsim_mem_cb == NULL)
 		return;
@@ -1026,25 +1026,25 @@ static inline void memop_callback(uint32_t addr, uint32_t size, int type)
 	qsim_mem_cb(qsim_id, addr, 0, size, type);
 }
 
-void HELPER(store_callback_pre)(uint32_t vaddr, uint32_t length, uint32_t type)
+void HELPER(store_callback_pre)(uint64_t vaddr, uint32_t length, uint32_t type)
 {
 	memop_callback(vaddr, length, type);
 	return;
 }
 
-void HELPER(store_callback_post)(uint32_t vaddr, uint32_t length, uint32_t type)
+void HELPER(store_callback_post)(uint64_t vaddr, uint32_t length, uint32_t type)
 {
 	memop_callback(vaddr, length, type);
 	return;
 }
 
-void HELPER(load_callback_pre)(uint32_t vaddr, uint32_t length, uint32_t type)
+void HELPER(load_callback_pre)(uint64_t vaddr, uint32_t length, uint32_t type)
 {
 	memop_callback(vaddr, length, type);
 	return;
 }
 
-void HELPER(load_callback_post)(uint32_t vaddr, uint32_t length, uint32_t type)
+void HELPER(load_callback_post)(uint64_t vaddr, uint32_t length, uint32_t type)
 {
 	memop_callback(vaddr, length, type);
 	return;
@@ -1083,11 +1083,12 @@ void mem_wr_virt(uint64_t vaddr, uint8_t val);
 
 uint64_t get_reg(enum regs r)
 {
-    if (r <= QSIM_R15) {
+    if (r != QSIM_CPSR) {
         helper_get_user_reg(qsim_cpu, r);
     } else {
         switch (r) {
-        case QSIM_CPSR: return cpsr_read(qsim_cpu);
+        case QSIM_CPSR:
+            return cpsr_read(qsim_cpu);
         default: break;
         }
     }
@@ -1097,17 +1098,50 @@ uint64_t get_reg(enum regs r)
 
 void set_reg(enum regs r, uint64_t val)
 {
-    if (r <= QSIM_R15) {
+    if (r != QSIM_CPSR) {
         helper_set_user_reg(qsim_cpu, r, val);
     } else {
         switch (r) {
-        case QSIM_CPSR: cpsr_write(qsim_cpu, val, ~0); break;
+        case QSIM_CPSR:
+            cpsr_write(qsim_cpu, val, ~0);
         default: break;
         }
     }
 
 	return;
 }
+
+uint64_t get_reg64(enum regs64 r)
+{
+    if (r != QSIM_CPSR64) {
+        helper_get_user_reg(qsim_cpu, r);
+    } else {
+        switch (r) {
+        case QSIM_CPSR:
+            return cpsr_read(qsim_cpu);
+        default: break;
+        }
+    }
+
+	return 0;
+}
+
+void set_reg64(enum regs64 r, uint64_t val)
+{
+    if (r != QSIM_CPSR64) {
+        helper_set_user_reg(qsim_cpu, r, val);
+    } else {
+        switch (r) {
+        case QSIM_CPSR64:
+            cpsr_write(qsim_cpu, val, ~0);
+        default: break;
+        }
+    }
+
+	return;
+}
+
+
 
 uint8_t mem_rd(uint64_t paddr)
 {
