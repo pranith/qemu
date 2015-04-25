@@ -739,6 +739,8 @@ static void do_gpr_ld_memidx(DisasContext *s, TCGv_i64 dest, TCGv_i64 tcg_addr,
                              int size, bool is_signed, bool extend, int memidx)
 {
     TCGMemOp memop = s->be_data + size;
+    TCGv_i32 tmp_size, tmp_type;
+    TCGMemOp memop = MO_TE + size;
 
     g_assert(size <= 3);
 
@@ -746,7 +748,13 @@ static void do_gpr_ld_memidx(DisasContext *s, TCGv_i64 dest, TCGv_i64 tcg_addr,
         memop += MO_SIGN;
     }
 
+    tmp_size = tcg_const_i32(size);
+    tmp_type = tcg_const_i32(1);
+    gen_helper_load_callback_pre(tcg_addr, tmp_size, tmp_type);
     tcg_gen_qemu_ld_i64(dest, tcg_addr, memidx, memop);
+    gen_helper_load_callback_post(tcg_addr, tmp_size, tmp_type);
+    tcg_temp_free_i32(tmp_size);
+    tcg_temp_free_i32(tmp_type);
 
     if (extend && is_signed) {
         g_assert(size < 3);
@@ -1857,6 +1865,7 @@ static void disas_ldst_excl(DisasContext *s, uint32_t insn)
      */
 
     if (is_excl) {
+        gen_helper_atomic_callback();
         if (!is_store) {
             s->is_ldex = true;
             gen_load_exclusive(s, rt, rt2, tcg_addr, size, is_pair);
@@ -10976,10 +10985,19 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
 static void disas_a64_insn(CPUARMState *env, DisasContext *s)
 {
     uint32_t insn;
+    TCGv_i32 tmp_insn, tmp_size, tmp_type;
 
     insn = arm_ldl_code(env, s->pc, s->sctlr_b);
     s->insn = insn;
     s->pc += 4;
+
+    tmp_insn = tcg_const_i32(insn);
+    tmp_size = tcg_const_i32(4);
+    tmp_type = tcg_const_i32(0);
+    gen_helper_inst_callback(tmp_insn, tmp_size, tmp_type);
+    tcg_temp_free_i32(tmp_insn);
+    tcg_temp_free_i32(tmp_size);
+    tcg_temp_free_i32(tmp_type);
 
     s->fp_access_checked = false;
 
