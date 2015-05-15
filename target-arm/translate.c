@@ -923,6 +923,7 @@ static inline void store_reg_from_load(DisasContext *s, int reg, TCGv_i32 var)
 #else
 #define IS_USER_ONLY 0
 #endif
+extern bool qsim_gen_callbacks;
 
 /* Abstractions of "generate code to do a guest load/store for
  * AArch32", where a vaddr is always 32 bits (and is zero
@@ -933,7 +934,6 @@ static inline void store_reg_from_load(DisasContext *s, int reg, TCGv_i32 var)
  */
 #if TARGET_LONG_BITS == 32
 
-// TODO: generate callbacks for 64-bit
 #define DO_GEN_LD(SUFF, OPC)                                                \
 static inline void gen_aa32_ld##SUFF(TCGv_i32 val, TCGv_i32 addr, int index)\
 {                                                                           \
@@ -1072,9 +1072,22 @@ static inline void gen_aa32_st##SUFF(TCGv_i32 val, TCGv_i32 addr, int index)\
 
 static inline void gen_aa32_ld64(TCGv_i64 val, TCGv_i32 addr, int index)
 {
+    TCGv_i32 tmp_size, tmp_type;
     TCGv addr64 = tcg_temp_new();
+    int size = 8;
+
     tcg_gen_extu_i32_i64(addr64, addr);
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(size);
+      tmp_type = tcg_const_i32(1);
+      gen_helper_load_callback_pre(addr64, tmp_size, tmp_type);
+    }
     tcg_gen_qemu_ld_i64(val, addr64, index, MO_TEQ);
+    if (qsim_gen_callbacks) {
+      gen_helper_load_callback_post(addr64, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    }
     tcg_temp_free(addr64);
 }
 
