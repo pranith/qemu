@@ -1990,6 +1990,7 @@ static void qsim_loop_main(void)
         dev_time += profile_getclock() - ti;
 #endif
     } while (!main_loop_should_exit());
+
     bdrv_close_all();
 	pause_all_vcpus();
     res_free();
@@ -3148,7 +3149,9 @@ void qemu_init(qemu_ramdesc_t *ram,
         "-kernel", arm_kernel_path,
         "-initrd", arm_initrd_path,
         "-append", "root=/dev/sda2",
-		NULL
+        "-display", "sdl",
+        "-redir", "tcp:2222::22",
+        NULL
 	};
 
 #elif defined(X86_64)
