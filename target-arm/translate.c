@@ -947,13 +947,17 @@ static inline void gen_aa32_ld##SUFF(TCGv_i32 val, TCGv_i32 addr, int index)\
     else if (!(strcmp(STRING(SUFF), "32u") && strcmp(STRING(SUFF), "32s"))) \
         size = 4;                                                           \
                                                                             \
-    tmp_size = tcg_const_i32(size);                                         \
-    tmp_type = tcg_const_i32(1);                                            \
-    gen_helper_load_callback_pre(addr, tmp_size, tmp_type);                 \
+    if (qsim_gen_callbacks) {                                               \
+      tmp_size = tcg_const_i32(size);                                       \
+      tmp_type = tcg_const_i32(1);                                          \
+      gen_helper_load_callback_pre(addr, tmp_size, tmp_type);               \
+    }                                                                       \
     tcg_gen_qemu_ld_i32(val, addr, index, OPC);                             \
-    gen_helper_load_callback_post(addr, tmp_size, tmp_type);                \
-    tcg_temp_free_i32(tmp_size);                                            \
-    tcg_temp_free_i32(tmp_type);                                            \
+    if (qsim_gen_callbacsk) {                                               \
+      gen_helper_load_callback_post(addr, tmp_size, tmp_type);              \
+      tcg_temp_free_i32(tmp_size);                                          \
+      tcg_temp_free_i32(tmp_type);                                          \
+    }                                                                       \
 }
 
 #define DO_GEN_ST(SUFF, OPC)                                                \
@@ -975,13 +979,17 @@ static inline void gen_aa32_st##SUFF(TCGv_i32 val, TCGv_i32 addr, int index)\
             break;                                                          \
     }                                                                       \
                                                                             \
-    tmp_size = tcg_const_i32(size);                                         \
-    tmp_type = tcg_const_i32(0);                                            \
-    gen_helper_store_callback_pre(addr, tmp_size, tmp_type);                \
+    if (qsim_gen_callbacks) {                                               \
+      tmp_size = tcg_const_i32(size);                                       \
+      tmp_type = tcg_const_i32(0);                                          \
+      gen_helper_store_callback_pre(addr, tmp_size, tmp_type);              \
+    }                                                                       \
     tcg_gen_qemu_st_i32(val, addr, index, OPC);                             \
-    gen_helper_store_callback_post(addr, tmp_size, tmp_type);               \
-    tcg_temp_free_i32(tmp_size);                                            \
-    tcg_temp_free_i32(tmp_type);                                            \
+    if (qsim_gen_callbacks) {                                               \
+      gen_helper_store_callback_post(addr, tmp_size, tmp_type);             \
+      tcg_temp_free_i32(tmp_size);                                          \
+      tcg_temp_free_i32(tmp_type);                                          \
+    }                                                                       \
 }
 
 static inline void gen_aa32_ld64(TCGv_i64 val, TCGv_i32 addr, int index)
@@ -989,13 +997,17 @@ static inline void gen_aa32_ld64(TCGv_i64 val, TCGv_i32 addr, int index)
     TCGv tmp_size = 0, tmp_type = 0;
     int size = 8;
 
-    tmp_size = tcg_const_i32(size);
-    tmp_type = tcg_const_i32(1);
-    gen_helper_load_callback_pre(addr, tmp_size, tmp_type);
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(size);
+      tmp_type = tcg_const_i32(1);
+      gen_helper_load_callback_pre(addr, tmp_size, tmp_type);
+    }
     tcg_gen_qemu_ld_i64(val, addr, index, MO_TEQ);
-    gen_helper_load_callback_post(addr, tmp_size, tmp_type);
-    tcg_temp_free_i32(tmp_size);
-    tcg_temp_free_i32(tmp_type);
+    if (qsim_gen_callbacks) {
+      gen_helper_load_callback_post(addr, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    }
 }
 
 static inline void gen_aa32_st64(TCGv_i64 val, TCGv_i32 addr, int index)
@@ -1003,13 +1015,17 @@ static inline void gen_aa32_st64(TCGv_i64 val, TCGv_i32 addr, int index)
     TCGv tmp_size = 0, tmp_type = 0;
     int size = 8;
 
-    tmp_size = tcg_const_i32(size);
-    tmp_type = tcg_const_i32(0);
-    gen_helper_load_callback_pre(addr, tmp_size, tmp_type);
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(size);
+      tmp_type = tcg_const_i32(0);
+      gen_helper_load_callback_pre(addr, tmp_size, tmp_type);
+    }
     tcg_gen_qemu_st_i64(val, addr, index, MO_TEQ);
-    gen_helper_load_callback_post(addr, tmp_size, tmp_type);
-    tcg_temp_free_i32(tmp_size);
-    tcg_temp_free_i32(tmp_type);
+    if (qsim_gen_callbacks) {
+      gen_helper_load_callback_post(addr, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    }
 }
 
 #else
@@ -1028,15 +1044,19 @@ static inline void gen_aa32_ld##SUFF(TCGv_i32 val, TCGv_i32 addr, int index)\
     else if (!(strcmp(STRING(SUFF), "32u") && strcmp(STRING(SUFF), "32s"))) \
         size = 4;                                                           \
                                                                             \
-    tmp_size = tcg_const_i32(size);                                         \
-    tmp_type = tcg_const_i32(1);                                            \
     tcg_gen_extu_i32_i64(addr64, addr);                                     \
-    gen_helper_load_callback_pre(addr64, tmp_size, tmp_type);                 \
+    if (qsim_gen_callbacks) {                                               \
+      tmp_size = tcg_const_i32(size);                                       \
+      tmp_type = tcg_const_i32(1);                                          \
+      gen_helper_load_callback_pre(addr64, tmp_size, tmp_type);             \
+    }                                                                       \
     tcg_gen_qemu_ld_i32(val, addr64, index, OPC);                           \
-    gen_helper_load_callback_post(addr64, tmp_size, tmp_type);                \
+    if (qsim_gen_callbacks) {                                               \
+      gen_helper_load_callback_post(addr64, tmp_size, tmp_type);            \
+      tcg_temp_free_i32(tmp_size);                                          \
+      tcg_temp_free_i32(tmp_type);                                          \
+    }                                                                       \
     tcg_temp_free(addr64);                                                  \
-    tcg_temp_free_i32(tmp_size);                                            \
-    tcg_temp_free_i32(tmp_type);                                            \
 }
 
 #define DO_GEN_ST(SUFF, OPC)                                                \
@@ -1059,15 +1079,19 @@ static inline void gen_aa32_st##SUFF(TCGv_i32 val, TCGv_i32 addr, int index)\
             break;                                                          \
     }                                                                       \
                                                                             \
-    tmp_size = tcg_const_i32(size);                                         \
-    tmp_type = tcg_const_i32(0);                                            \
     tcg_gen_extu_i32_i64(addr64, addr);                                     \
-    gen_helper_store_callback_pre(addr64, tmp_size, tmp_type);                \
+    if (qsim_gen_callbacks) {                                               \
+      tmp_size = tcg_const_i32(size);                                       \
+      tmp_type = tcg_const_i32(0);                                          \
+      gen_helper_store_callback_pre(addr64, tmp_size, tmp_type);            \
+    }                                                                       \
     tcg_gen_qemu_st_i32(val, addr64, index, OPC);                           \
-    gen_helper_store_callback_post(addr64, tmp_size, tmp_type);               \
+    if (qsim_gen_callbacks) {                                               \
+      gen_helper_store_callback_post(addr64, tmp_size, tmp_type);           \
+      tcg_temp_free_i32(tmp_size);                                          \
+      tcg_temp_free_i32(tmp_type);                                          \
+    }                                                                       \
     tcg_temp_free(addr64);                                                  \
-    tcg_temp_free_i32(tmp_size);                                            \
-    tcg_temp_free_i32(tmp_type);                                            \
 }
 
 static inline void gen_aa32_ld64(TCGv_i64 val, TCGv_i32 addr, int index)
@@ -1097,15 +1121,19 @@ static inline void gen_aa32_st64(TCGv_i64 val, TCGv_i32 addr, int index)
     TCGv addr64 = tcg_temp_new();
     int size = 8;
 
-    tmp_size = tcg_const_i32(size);
-    tmp_type = tcg_const_i32(0);
     tcg_gen_extu_i32_i64(addr64, addr);
-    gen_helper_load_callback_pre(addr64, tmp_size, tmp_type);
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(size);
+      tmp_type = tcg_const_i32(0);
+      gen_helper_load_callback_pre(addr64, tmp_size, tmp_type);
+    }
     tcg_gen_qemu_st_i64(val, addr64, index, MO_TEQ);
-    gen_helper_load_callback_post(addr64, tmp_size, tmp_type);
+    if (qsim_gen_callbacks) {
+      gen_helper_load_callback_post(addr64, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    }
     tcg_temp_free(addr64);
-    tcg_temp_free_i32(tmp_size);
-    tcg_temp_free_i32(tmp_type);
 }
 
 #endif
@@ -7765,13 +7793,17 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
     TCGv_i64 tmp64;
     TCGv_i32 tmp_insn = 0, tmp_size = 0, tmp_type = 0;
 
-    tmp_insn = tcg_const_i32(insn);
-    tmp_size = tcg_const_i32(4);
-    tmp_type = tcg_const_i32(0);
-    gen_helper_inst_callback(tmp_insn, tmp_size, tmp_type);
-    tcg_temp_free_i32(tmp_insn);
-    tcg_temp_free_i32(tmp_size);
-    tcg_temp_free_i32(tmp_type);
+    if (qsim_gen_callbacks) {
+      tmp_insn = tcg_const_i32(insn);
+      tmp_size = tcg_const_i32(4);
+      tmp_type = tcg_const_i32(0);
+      gen_helper_inst_callback(tmp_insn, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_insn);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    } else {
+        gen_helper_qsim_callback();
+    }
 
     /* M variants do not implement ARM mode.  */
     if (arm_dc_feature(s, ARM_FEATURE_M)) {
@@ -8509,7 +8541,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
                         addr = tcg_temp_local_new_i32();
                         load_reg_var(s, addr, rn);
 
-                        gen_helper_atomic_callback();
+                        if (qsim_gen_callbacks)
+                          gen_helper_atomic_callback();
                         /* Since the emulation does not have barriers,
                            the acquire/release semantics need no special
                            handling */
@@ -8586,7 +8619,8 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
                         }
                         tcg_temp_free_i32(addr);
                     } else {
-                        gen_helper_atomic_callback();
+                        if (qsim_gen_callbacks)
+                          gen_helper_atomic_callback();
                         /* SWP instruction */
                         rm = (insn) & 0xf;
 
@@ -10610,13 +10644,17 @@ static void disas_thumb_insn(CPUARMState *env, DisasContext *s)
     insn = arm_lduw_code(env, s->pc, s->bswap_code);
     s->pc += 2;
 
-    tmp_insn = tcg_const_i32(insn);
-    tmp_size = tcg_const_i32(2);
-    tmp_type = tcg_const_i32(0);
-    gen_helper_inst_callback(tmp_insn, tmp_size, tmp_type);
-    tcg_temp_free_i32(tmp_insn);
-    tcg_temp_free_i32(tmp_size);
-    tcg_temp_free_i32(tmp_type);
+    if (qsim_gen_callbacks) {
+      tmp_insn = tcg_const_i32(insn);
+      tmp_size = tcg_const_i32(2);
+      tmp_type = tcg_const_i32(0);
+      gen_helper_inst_callback(tmp_insn, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_insn);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    } else {
+        gen_helper_qsim_callback();
+    }
 
     switch (insn >> 12) {
     case 0: case 1:
