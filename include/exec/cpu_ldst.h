@@ -47,6 +47,8 @@
 #ifndef CPU_LDST_H
 #define CPU_LDST_H
 
+extern uint64_t qsim_host_addr;
+
 #if defined(CONFIG_USER_ONLY)
 /* All direct uses of g2h and h2g need to go away for usermode softmmu.  */
 #define g2h(x) ((void *)((unsigned long)(target_ulong)(x) + GUEST_BASE))
@@ -72,6 +74,14 @@
     h2g_nocheck(x); \
 })
 
+#define saddr(x) g2h(x)
+#define laddr(x) g2h(x)
+
+#else /* !CONFIG_USER_ONLY */
+/* NOTE: we use double casts if pointers and target_ulong have
+   different sizes */
+#define saddr(x) (uint8_t *)(intptr_t)(qsim_host_addr = (long)x)
+#define laddr(x) (uint8_t *)(intptr_t)(qsim_host_addr = (long)x)
 #endif
 
 #if defined(CONFIG_USER_ONLY)
