@@ -11047,7 +11047,8 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
 static void disas_a64_insn(CPUARMState *env, DisasContext *s)
 {
     uint32_t insn;
-    TCGv_i32 tmp_insn, tmp_size, tmp_type;
+    TCGv_i32 tmp_size, tmp_type;
+    TCGv_i64 tmp_insn;
 
     insn = arm_ldl_code(env, s->pc, s->bswap_code);
     s->insn = insn;
@@ -11062,7 +11063,7 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
         tmp_type = tcg_const_i32(0xdeadbeef);
         gen_a64_set_pc_im(s->pc);
         gen_helper_inst_callback(cpu_env, tmp_insn, tmp_size, tmp_type);
-        tcg_temp_free_i32(tmp_insn);
+        tcg_temp_free_i64(tmp_insn);
         tcg_temp_free_i32(tmp_size);
         tcg_temp_free_i32(tmp_type);
     } else {
