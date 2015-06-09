@@ -1015,8 +1015,8 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
     qsim_icount--;
     //printf("%x:%x:%x\n", vaddr, length, type);
     if (qsim_icount == 0) {
-        swapcontext(&qemu_context, &main_context);
         checkcontext();
+        swapcontext(&qemu_context, &main_context);
     }
 
     if (qsim_inst_cb != NULL) {
@@ -1029,13 +1029,15 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
     }
 
     if (call_magic_cb) {
-        if (!qsim_gen_callbacks)  // end
+        if (!qsim_gen_callbacks) {  // end
+            tb_flush(CPU(arm_env_get_cpu(env)));
             qsim_magic_cb(0, 0xfa11dead);
+        }
 
         call_magic_cb = false;
     }
 
-	  return;
+    return;
 }
 
 static inline void memop_callback(uint64_t addr, uint32_t size, int type)
@@ -1090,8 +1092,8 @@ void HELPER(qsim_callback)(void)
 {
     qsim_icount--;
     if (qsim_icount == 0) {
-        swapcontext(&qemu_context, &main_context);
         checkcontext();
+        swapcontext(&qemu_context, &main_context);
     }
 
     return;
