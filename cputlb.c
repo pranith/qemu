@@ -64,8 +64,53 @@
         }                                                         \
     } while (0)
 
+/* run_on_cpu_data.target_ptr should always be big enough for a
+ * target_ulong even on 32 bit builds */
+QEMU_BUILD_BUG_ON(sizeof(target_ulong) > sizeof(run_on_cpu_data));
+
+static inline run_on_cpu_data target_ptr(target_ulong tptr)
+{
+    run_on_cpu_data d = { .target_ptr = (vaddr) tptr };
+    return d;
+}
+
+static inline run_on_cpu_data host_int(int hint)
+{
+    run_on_cpu_data d = { .host_int = hint };
+    return d;
+}
+
+
 /* statistics */
 int tlb_flush_count;
+
+static void tlb_flush_nocheck(CPUState *cpu, int flush_global)
+{
+    CPUArchState *env = cpu->env_ptr;
+
+    assert_cpu_is_self(cpu);
+    tlb_debug("(%d)\n", flush_global);
+
+    tb_lock();
+
+    memset(env->tlb_table, -1, sizeof(env->tlb_table));
+    memset(env->tlb_v_table, -1, sizeof(env->tlb_v_table));
+    memset(cpu->tb_jmp_cache, 0, sizeof(cpu->tb_jmp_cache));
+
+    env->vtlb_index = 0;
+    env->tlb_flush_addr = -1;
+    env->tlb_flush_mask = 0;
+    tlb_flush_count++;
+
+    tb_unlock();
+
+    atomic_mb_set(&cpu->pending_tlb_flush, false);
+}
+
+static void tlb_flush_global_async_work(CPUState *cpu, run_on_cpu_data data)
+{
+    tlb_flush_nocheck(cpu, data.host_int);
+}
 
 /* NOTE:
  * If flush_global is true (the usual case), flush all tlb entries.
@@ -81,19 +126,14 @@ int tlb_flush_count;
  */
 void tlb_flush(CPUState *cpu, int flush_global)
 {
-    CPUArchState *env = cpu->env_ptr;
-
-    assert_cpu_is_self(cpu);
-    tlb_debug("(%d)\n", flush_global);
-
-    memset(env->tlb_table, -1, sizeof(env->tlb_table));
-    memset(env->tlb_v_table, -1, sizeof(env->tlb_v_table));
-    memset(cpu->tb_jmp_cache, 0, sizeof(cpu->tb_jmp_cache));
-
-    env->vtlb_index = 0;
-    env->tlb_flush_addr = -1;
-    env->tlb_flush_mask = 0;
-    tlb_flush_count++;
+    if (cpu->created && !qemu_cpu_is_self(cpu)) {
+        if (atomic_bool_cmpxchg(&cpu->pending_tlb_flush, false, true)) {
+            async_run_on_cpu(cpu, tlb_flush_global_async_work,
+                             host_int(flush_global));
+        }
+    } else {
+        tlb_flush_nocheck(cpu, flush_global);
+    }
 }
 
 static inline void v_tlb_flush_by_mmuidx(CPUState *cpu, va_list argp)
@@ -102,6 +142,8 @@ static inline void v_tlb_flush_by_mmuidx(CPUState *cpu, va_list argp)
 
     assert_cpu_is_self(cpu);
     tlb_debug("start\n");
+
+    tb_lock();
 
     for (;;) {
         int mmu_idx = va_arg(argp, int);
@@ -117,6 +159,8 @@ static inline void v_tlb_flush_by_mmuidx(CPUState *cpu, va_list argp)
     }
 
     memset(cpu->tb_jmp_cache, 0, sizeof(cpu->tb_jmp_cache));
+
+    tb_unlock();
 }
 
 void tlb_flush_by_mmuidx(CPUState *cpu, ...)
@@ -139,13 +183,15 @@ static inline void tlb_flush_entry(CPUTLBEntry *tlb_entry, target_ulong addr)
     }
 }
 
-void tlb_flush_page(CPUState *cpu, target_ulong addr)
+static void tlb_flush_page_async_work(CPUState *cpu, run_on_cpu_data data)
 {
     CPUArchState *env = cpu->env_ptr;
+    target_ulong addr = (target_ulong) data.target_ptr;
     int i;
     int mmu_idx;
 
     assert_cpu_is_self(cpu);
+
     tlb_debug("page :" TARGET_FMT_lx "\n", addr);
 
     /* Check if we need to flush due to large pages.  */
@@ -173,6 +219,17 @@ void tlb_flush_page(CPUState *cpu, target_ulong addr)
     }
 
     tb_flush_jmp_cache(cpu, addr);
+}
+
+void tlb_flush_page(CPUState *cpu, target_ulong addr)
+{
+    tlb_debug("page :" TARGET_FMT_lx "\n", addr);
+
+    if (!qemu_cpu_is_self(cpu)) {
+        async_run_on_cpu(cpu, tlb_flush_page_async_work, target_ptr(addr));
+    } else {
+        tlb_flush_page_async_work(cpu, target_ptr(addr));
+    }
 }
 
 void tlb_flush_page_by_mmuidx(CPUState *cpu, target_ulong addr, ...)
@@ -219,6 +276,15 @@ void tlb_flush_page_by_mmuidx(CPUState *cpu, target_ulong addr, ...)
     va_end(argp);
 
     tb_flush_jmp_cache(cpu, addr);
+}
+
+void tlb_flush_page_all(target_ulong addr)
+{
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu) {
+        async_run_on_cpu(cpu, tlb_flush_page_async_work, target_ptr(addr));
+    }
 }
 
 /* update the TLBs so that writes to code in the virtual page 'addr'
