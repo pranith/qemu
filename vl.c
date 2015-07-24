@@ -258,11 +258,13 @@ reg_cb_t    qsim_reg_cb    = NULL;
 trans_cb_t  qsim_trans_cb  = NULL;
 
 bool qsim_gen_callbacks = false;
+bool qsim_sys_callbacks = false;
 
 uint64_t	qsim_host_addr;
 uint64_t	qsim_phys_addr;
 
-uint64_t    qsim_icount = 10000000;
+uint64_t    qsim_icount   = 10000000;
+uint64_t    qsim_tpid     = 0;
 bool        call_magic_cb = false;
 
 qsim_ucontext_t main_context;
@@ -289,6 +291,11 @@ void set_gen_cbs  (bool state) {
   // Mark all generated TBs as stale so that new TBs are generated
 
   qsim_gen_callbacks = state;
+}
+
+// Generate callbacks for system/application instructions only
+void set_sys_cbs  (bool state) {
+  qsim_sys_callbacks = state;
 }
 
 static QemuOptsList qemu_rtc_opts = {
@@ -3041,7 +3048,7 @@ int interrupt(uint8_t vec) {
 
 void qemu_init(qemu_ramdesc_t *ram,
                const char* ram_size,
-               int cpu_id)
+               int cpu_id, int ncpus)
 {
     // Assemble argv based on given arguments.
 	/*
@@ -3055,7 +3062,9 @@ void qemu_init(qemu_ramdesc_t *ram,
     char arm_initrd_path[1024];
     char arm_sd_path[1024];
     char arm_img_options[1024];
+    char n_cpus[16];
 
+    snprintf(n_cpus, sizeof(n_cpus), "%d", ncpus);
     strcpy(arm_kernel_path, qsim_prefix);
     strcpy(arm_initrd_path, qsim_prefix);
     strcpy(arm_sd_path, qsim_prefix);
@@ -3097,7 +3106,7 @@ void qemu_init(qemu_ramdesc_t *ram,
         "-append", "root=/dev/sda2",
         "-display", "sdl",
         "-redir", "tcp:2222::22",
-		"-smp", "2",
+		"-smp", n_cpus,
 		NULL
 	};
 

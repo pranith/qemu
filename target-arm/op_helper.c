@@ -40,6 +40,7 @@ extern uint64_t qsim_phys_addr;
 extern int qsim_id;
 
 extern uint64_t qsim_icount;
+extern uint64_t qsim_tpid;
 extern bool     call_magic_cb;
 uint64_t qsim_eip;
 extern inst_cb_t    qsim_inst_cb;
@@ -49,6 +50,7 @@ extern int_cb_t     qsim_int_cb;
 extern magic_cb_t   qsim_magic_cb;
 
 extern bool qsim_gen_callbacks;
+extern bool qsim_sys_callbacks;
 
 void checkcontext(void);
 
@@ -1051,11 +1053,15 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
 	ARMCPU* cpu = arm_env_get_cpu(env);
 	CPUState* cs = CPU(cpu);
 	qsim_id = cs->cpu_index;
+
 	qsim_icount--;
 	if (qsim_icount == 0) {
         checkcontext();
         swapcontext(&qemu_context, &main_context);
     }
+
+    if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el1, 0, 32) != qsim_tpid)
+        return;
 
     if (qsim_inst_cb != NULL) {
         uint8_t *buf;
@@ -1065,6 +1071,7 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
     }
 
     if (call_magic_cb) {
+        call_magic_cb = false;
         if (!qsim_gen_callbacks) {  // end
             tb_flush(CPU(arm_env_get_cpu(env)));
             qsim_magic_cb(0, 0xfa11dead);
@@ -1078,14 +1085,17 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
 
 static inline void memop_callback(CPUARMState *env, uint64_t addr, uint32_t size, int type)
 {
-    if (qsim_mem_cb == NULL)
-        return;
-    else {
-        uint8_t *buf = NULL;
-        buf = get_host_vaddr(env, addr, size);
-        if (buf)
-            qsim_mem_cb(qsim_id, addr, (uint64_t)buf, size, type);
-    }
+  if (!qsim_sys_callbacks && extract64(env->cp15.tpidrro_el0, 0, 32) != qsim_tpid)
+    return;
+
+	if (qsim_mem_cb == NULL)
+		return;
+  else {
+    uint8_t *buf = NULL;
+    buf = get_host_vaddr(env, addr, size);
+    if (buf)
+      qsim_mem_cb(qsim_id, addr, (uint64_t)buf, size, type);
+  }
 }
 
 void HELPER(store_callback_pre)(CPUARMState *env, uint64_t vaddr, uint32_t length, uint32_t type)
