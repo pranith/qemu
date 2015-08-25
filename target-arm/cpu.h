@@ -93,6 +93,8 @@
 #define ARM_CPU_VIRQ 2
 #define ARM_CPU_VFIQ 3
 
+int interrupt(uint8_t vec);
+
 struct arm_boot_info;
 
 #define NB_MMU_MODES 7
