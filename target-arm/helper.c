@@ -2864,7 +2864,7 @@ static uint64_t aa64_dczid_read(CPUARMState *env, const ARMCPRegInfo *ri)
         qsim_gen_callbacks = !qsim_gen_callbacks;
 
         if (qsim_gen_callbacks) {
-            qsim_tpid = extract64(env->cp15.contextidr_el1, 0, 32);
+            qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
             printf("Enabling callback generation ");
             if (qsim_sys_callbacks)
                 printf("systemwide.\n");
@@ -2883,7 +2883,7 @@ static uint64_t aa64_dczid_read(CPUARMState *env, const ARMCPRegInfo *ri)
          */
         if (qsim_magic_cb) {
             if (qsim_gen_callbacks)  { // start
-                tb_flush(CPU(arm_env_get_cpu(env)));
+                tb_flush(CPU(cpu));
                 qsim_magic_cb(0, 0xaaaaaaaa);
             }
         }
