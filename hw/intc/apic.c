@@ -625,6 +625,7 @@ static void apic_timer_update(APICCommonState *s, int64_t current_time)
     */
 }
 
+/*
 static void apic_timer(void *opaque)
 {
     APICCommonState *s = opaque;
@@ -632,6 +633,7 @@ static void apic_timer(void *opaque)
     //apic_local_deliver(s, APIC_LVT_TIMER);
     apic_timer_update(s, s->next_time);
 }
+*/
 
 static uint32_t apic_mem_readb(void *opaque, hwaddr addr)
 {
