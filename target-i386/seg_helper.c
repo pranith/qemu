@@ -68,11 +68,22 @@
 #undef MEMSUFFIX
 #endif
 
+extern uint64_t qsim_locked_addr;
+extern bool atomic_flag;
+extern int atomic_locked;
+extern uint64_t atomic_addr;
+extern int nonatomic_locked;
+
+extern int_cb_t     qsim_int_cb;
+extern qsim_lockstruct *qsim_ram_l;
 /* return non zero if error */
 static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
                                uint32_t *e2_ptr, int selector,
                                uintptr_t retaddr)
 {
+    int qsim_memop_bak = qsim_memop_flag, rval;
+    qsim_memop_flag = 0;
+
     SegmentCache *dt;
     int index;
     target_ulong ptr;
@@ -84,12 +95,18 @@ static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
     }
     index = selector & ~7;
     if ((index + 7) > dt->limit) {
-        return -1;
+        rval = -1;
+        goto ls_end;
     }
     ptr = dt->base + index;
     *e1_ptr = cpu_ldl_kernel_ra(env, ptr, retaddr);
     *e2_ptr = cpu_ldl_kernel_ra(env, ptr + 4, retaddr);
-    return 0;
+
+    rval = 0;
+
+ls_end:
+    qsim_memop_flag = qsim_memop_bak;
+    return rval;
 }
 
 static inline int load_segment(CPUX86State *env, uint32_t *e1_ptr,
@@ -1201,6 +1218,18 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
                              int error_code, target_ulong next_eip, int is_hw)
 {
     CPUX86State *env = &cpu->env;
+
+    qsim_memop_flag = 0;
+    if (atomic_flag) helper_unlock();
+    if (nonatomic_locked) {
+        qsim_unlock_addr(qsim_ram_l, qsim_locked_addr);
+        nonatomic_locked = 0;
+    }
+
+    if (qsim_int_cb != NULL && qsim_int_cb(qsim_id, intno) && is_int) {
+        env->eip = next_eip;
+        return;
+    }
 
     if (qemu_loglevel_mask(CPU_LOG_INT)) {
         if ((env->cr[0] & CR0_PE_MASK)) {
