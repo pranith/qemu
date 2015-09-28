@@ -38,6 +38,7 @@
 #include "trace-tcg.h"
 
 #include "qsim-vm.h"
+#include "qsim-func.h"
 
 static TCGv_i64 cpu_X[32];
 static TCGv_i64 cpu_pc;
