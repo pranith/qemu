@@ -36,7 +36,6 @@ extern qsim_ucontext_t qemu_context;
 extern qsim_ucontext_t main_context;
 
 extern int qsim_memop_flag;
-extern uint64_t qsim_phys_addr;
 
 extern int qsim_id;
 
@@ -49,6 +48,7 @@ extern mem_cb_t     qsim_mem_cb;
 extern atomic_cb_t  qsim_atomic_cb;
 extern int_cb_t     qsim_int_cb;
 extern magic_cb_t   qsim_magic_cb;
+extern reg_cb_t     qsim_reg_cb;
 
 extern bool qsim_gen_callbacks;
 extern bool qsim_sys_callbacks;
@@ -1436,15 +1436,24 @@ void HELPER(load_callback_post)(CPUARMState *env, uint64_t vaddr, uint32_t lengt
 
 CPUARMState *qsim_cpu;
 
-void HELPER(reg_read_callback)(CPUARMState *env, uint32_t vaddr, uint32_t length, uint32_t type)
+void HELPER(reg_read_callback)(CPUARMState *env, uint32_t reg, uint32_t length)
 {
-	memop_callback(env, vaddr, length, type);
+	ARMCPU* cpu = arm_env_get_cpu(env);
+	CPUState* cs = CPU(cpu);
+	qsim_id = cs->cpu_index;
+	if (qsim_reg_cb)
+		qsim_reg_cb(qsim_id, reg, length, 0);
+
 	return;
 }
 
-void HELPER(reg_write_callback)(CPUARMState *env, uint32_t vaddr, uint32_t length, uint32_t type)
+void HELPER(reg_write_callback)(CPUARMState *env, uint32_t reg, uint32_t length)
 {
-	memop_callback(env, vaddr, length, type);
+	ARMCPU* cpu = arm_env_get_cpu(env);
+	CPUState* cs = CPU(cpu);
+	qsim_id = cs->cpu_index;
+	if (qsim_reg_cb)
+		qsim_reg_cb(qsim_id, reg, length, 1);
 	return;
 }
 

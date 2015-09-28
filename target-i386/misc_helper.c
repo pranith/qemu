@@ -23,8 +23,15 @@
 #include "exec/cpu_ldst.h"
 #include "exec/address-spaces.h"
 
+#include "qsim-vm.h"
+#include "qsim-context.h"
+
 extern io_cb_t qsim_io_cb;
 extern magic_cb_t qsim_magic_cb;
+extern int qsim_id;
+
+extern qsim_ucontext_t main_context;
+extern qsim_ucontext_t qemu_context;
 
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
