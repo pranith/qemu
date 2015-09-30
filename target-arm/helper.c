@@ -13,6 +13,8 @@
 #include <zlib.h> /* For crc32 */
 #include "exec/semihost.h"
 
+#include "qsim-context.h"
+
 #ifndef CONFIG_USER_ONLY
 static inline bool get_phys_addr(CPUARMState *env, target_ulong address,
                                  int access_type, ARMMMUIdx mmu_idx,
@@ -692,9 +694,40 @@ void pmccntr_sync(CPUARMState *env)
     }
 }
 
+extern bool qsim_gen_callbacks;
+extern bool qsim_sys_callbacks;
+extern magic_cb_t qsim_magic_cb;
+extern uint64_t qsim_tpid;
+extern int qsim_id;
+
+extern qsim_ucontext_t main_context;
+extern qsim_ucontext_t qemu_context;
+
 static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                        uint64_t value)
 {
+	ARMCPU *cpu = arm_env_get_cpu(env);
+	CPUState *cs = CPU(cpu);
+
+	qsim_id = cs->cpu_index;
+	if (value == 0xaaaaaaaa) { // start
+		qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
+		tb_flush(cs);
+		qsim_gen_callbacks = true;
+
+		printf("Enabling callback generation ");
+		if (qsim_sys_callbacks)
+			printf("systemwide.\n");
+		else
+			printf("for pid %ld.\n", qsim_tpid);
+	} else if (value == 0xfa11dead) {
+		tb_flush(cs);
+		qsim_gen_callbacks = false;
+	}
+
+    if (qsim_magic_cb && qsim_magic_cb(qsim_id, value))
+      swapcontext(&qemu_context, &main_context);
+
     pmccntr_sync(env);
 
     if (value & PMCRC) {
@@ -2314,61 +2347,10 @@ static CPAccessResult aa64_zva_access(CPUARMState *env, const ARMCPRegInfo *ri)
     return CP_ACCESS_OK;
 }
 
-extern uint64_t qsim_icount;
-extern bool qsim_gen_callbacks;
-extern bool qsim_sys_callbacks;
-extern magic_cb_t qsim_magic_cb;
-extern bool call_magic_cb;
-extern uint64_t qsim_tpid;
-
 static uint64_t aa64_dczid_read(CPUARMState *env, const ARMCPRegInfo *ri)
 {
     ARMCPU *cpu = arm_env_get_cpu(env);
     int dzp_bit = 1 << 4;
-    static uint64_t last_qsim_icount;
-    static int num_consecutive_dczid_reads;
-
-    int diff = last_qsim_icount - qsim_icount;
-
-    if (diff > 0 && diff < 3) {
-      last_qsim_icount = qsim_icount;
-      num_consecutive_dczid_reads++;
-
-      // found the pattern of 5 consecutive dczid reads
-      if (num_consecutive_dczid_reads == 4) {
-        qsim_gen_callbacks = !qsim_gen_callbacks;
-
-        if (qsim_gen_callbacks) {
-            qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
-            printf("Enabling callback generation ");
-            if (qsim_sys_callbacks)
-                printf("systemwide.\n");
-            else
-                printf("for pid %ld.\n", qsim_tpid);
-        }
-
-        // enable magic callback at next instruction callback
-        call_magic_cb = true;
-
-        /*
-         * App start callback needs to be called here, since qsim_inst_callback
-         * might already be set and will be invoked for the next instruction.
-         * But, app end callback should be called after processing the next
-         * instruction since a TB will end only after the branch cbz.
-         */
-        if (qsim_magic_cb) {
-            if (qsim_gen_callbacks)  { // start
-                tb_flush(CPU(cpu));
-                qsim_magic_cb(0, 0xaaaaaaaa);
-            }
-        }
-
-        num_consecutive_dczid_reads = 0;
-      }
-    } else {
-      num_consecutive_dczid_reads = 0;
-    }
-    last_qsim_icount = qsim_icount;
 
     /* DZP indicates whether DC ZVA access is allowed */
     if (aa64_zva_access(env, NULL) == CP_ACCESS_OK) {

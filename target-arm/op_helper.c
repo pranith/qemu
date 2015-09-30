@@ -40,7 +40,6 @@ extern int qsim_id;
 
 extern uint64_t qsim_icount;
 extern uint64_t qsim_tpid;
-extern bool     call_magic_cb;
 uint64_t qsim_eip;
 extern inst_cb_t    qsim_inst_cb;
 extern mem_cb_t     qsim_mem_cb;
@@ -1068,16 +1067,6 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
 
         buf = get_host_vaddr(env, vaddr, length);
         qsim_inst_cb(qsim_id, vaddr, 0, length, buf, type);
-    }
-
-    if (call_magic_cb) {
-        call_magic_cb = false;
-        if (!qsim_gen_callbacks) {  // end
-            tb_flush(CPU(arm_env_get_cpu(env)));
-            qsim_magic_cb(0, 0xfa11dead);
-        }
-
-        call_magic_cb = false;
     }
 
     return;
