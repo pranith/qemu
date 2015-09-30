@@ -976,7 +976,7 @@ static const ARMCPRegInfo v7_cp_reginfo[] = {
     { .name = "PMUSERENR", .cp = 15, .crn = 9, .crm = 14, .opc1 = 0, .opc2 = 0,
       .access = PL0_R | PL1_RW,
       .fieldoffset = offsetof(CPUARMState, cp15.c9_pmuserenr),
-      .resetvalue = 0,
+      .resetvalue = 1,
       .writefn = pmuserenr_write, .raw_writefn = raw_write },
     { .name = "PMINTENSET", .cp = 15, .crn = 9, .crm = 14, .opc1 = 0, .opc2 = 1,
       .access = PL1_RW,
