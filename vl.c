@@ -268,7 +268,6 @@ uint64_t	qsim_phys_addr;
 
 uint64_t    qsim_icount   = 10000000;
 uint64_t    qsim_tpid     = 0;
-bool        call_magic_cb = false;
 
 qsim_ucontext_t main_context;
 qsim_ucontext_t qemu_context;
