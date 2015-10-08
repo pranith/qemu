@@ -181,8 +181,8 @@ uint8_t mem_rd(CPUX86State *env, uint64_t paddr);
 void mem_wr(CPUX86State *env, uint64_t paddr, uint8_t value);
 uint8_t mem_rd_virt(CPUX86State *env, uint64_t vaddr);
 void mem_wr_virt(CPUX86State *env, uint64_t vaddr, uint8_t val);
-uint64_t get_reg(CPUX86State *env, enum regs r);
-void set_reg(enum regs r, uint64_t val);
+uint64_t get_reg(CPUX86State *env, int r);
+void set_reg(int r, uint64_t val);
 
 void helper_reg_read_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 {
@@ -198,7 +198,7 @@ void helper_reg_write_callback(CPUX86State *env, uint32_t reg, uint32_t size)
   return;
 }
 
-uint64_t get_reg(CPUX86State *env, enum regs r) {
+uint64_t get_reg(CPUX86State *env, int r) {
     CPUX86State *cpu = (CPUX86State *)first_cpu;
     switch (r) {
         case QSIM_RAX:    return cpu->regs[R_EAX];
@@ -280,7 +280,7 @@ static inline void qsim_update_seg(int seg) {
             cpu->segs[seg].flags);
 }
 
-void set_reg(enum regs r, uint64_t val) {
+void set_reg(int r, uint64_t val) {
     CPUX86State *cpu = (CPUX86State *)first_cpu;
 
     switch (r) {
