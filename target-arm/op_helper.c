@@ -1200,7 +1200,7 @@ void mem_wr(uint64_t paddr, uint8_t val);
 uint8_t mem_rd_virt(uint64_t vaddr);
 void mem_wr_virt(uint64_t vaddr, uint8_t val);
 
-uint64_t get_reg(enum regs r)
+uint64_t get_reg(int r)
 {
     if (r != QSIM_CPSR) {
         helper_get_user_reg(qsim_cpu, r);
@@ -1215,7 +1215,7 @@ uint64_t get_reg(enum regs r)
 	return 0;
 }
 
-void set_reg(enum regs r, uint64_t val)
+void set_reg(int r, uint64_t val)
 {
     if (r != QSIM_CPSR) {
         helper_set_user_reg(qsim_cpu, r, val);
@@ -1230,7 +1230,7 @@ void set_reg(enum regs r, uint64_t val)
 	return;
 }
 
-uint64_t get_reg64(enum regs64 r)
+uint64_t get_reg64(int r)
 {
     if (r != QSIM_CPSR64) {
         helper_get_user_reg(qsim_cpu, r);
@@ -1245,7 +1245,7 @@ uint64_t get_reg64(enum regs64 r)
 	return 0;
 }
 
-void set_reg64(enum regs64 r, uint64_t val)
+void set_reg64(int r, uint64_t val)
 {
     if (r != QSIM_CPSR64) {
         helper_set_user_reg(qsim_cpu, r, val);
