@@ -3024,13 +3024,6 @@ void qemu_init(qemu_ramdesc_t *ram,
                const char* ram_size,
                int cpu_id, int ncpus)
 {
-    // Assemble argv based on given arguments.
-	/*
-    const char *argv[] = {
-      "qemu", "-L", "qemu-0.12.3/pc-bios", "-no-hpet",
-      "-monitor", "/dev/null", "-nographic", "-serial", "/dev/null",
-      "-no-acpi", "-no-hpet", "-m", ram_size, NULL
-    }; */
     const char *qsim_prefix = getenv("QSIM_PREFIX");
     char arm_kernel_path[1024];
     char arm_initrd_path[1024];
@@ -3085,6 +3078,12 @@ void qemu_init(qemu_ramdesc_t *ram,
 	};
 
 #elif defined(X86_64)
+    // Assemble argv based on given arguments.
+    const char *argv[] = {
+      "qemu", "-L", "qemu-0.12.3/pc-bios", "-no-hpet",
+      "-monitor", "/dev/null", "-nographic", "-serial", "/dev/null",
+      "-no-acpi", "-no-hpet", "-m", ram_size, NULL
+    };
 #endif
 
     int argc;
