@@ -77,7 +77,6 @@ extern int nonatomic_locked;
 #include "qsim-vm.h"
 
 extern int_cb_t     qsim_int_cb;
-extern qsim_lockstruct *qsim_ram_l;
 extern int qsim_id;
 /* return non zero if error */
 static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
@@ -1224,7 +1223,6 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
 
     if (atomic_flag) helper_unlock();
     if (nonatomic_locked) {
-        qsim_unlock_addr(qsim_ram_l, qsim_locked_addr);
         nonatomic_locked = 0;
     }
 
