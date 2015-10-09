@@ -26,12 +26,22 @@
 #include "qsim-vm.h"
 #include "qsim-context.h"
 
+extern uint64_t qsim_icount;
 extern io_cb_t qsim_io_cb;
 extern magic_cb_t qsim_magic_cb;
 extern int qsim_id;
 
 extern qsim_ucontext_t main_context;
 extern qsim_ucontext_t qemu_context;
+
+void checkcontext(void);
+
+void checkcontext(void)
+{
+    static bool debug = false;
+    if (debug)
+        printf("swapped context");
+}
 
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
@@ -150,6 +160,17 @@ void helper_cpuid(CPUX86State *env)
         env->regs[R_ECX] = ecx;
         env->regs[R_EDX] = edx;
     }
+}
+
+void helper_qsim_callback(void)
+{
+    qsim_icount--;
+    if (qsim_icount == 0) {
+        checkcontext();
+        swapcontext(&qemu_context, &main_context);
+    }
+
+    return;
 }
 
 #if defined(CONFIG_USER_ONLY)

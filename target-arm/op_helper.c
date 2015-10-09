@@ -1446,7 +1446,7 @@ void HELPER(reg_write_callback)(CPUARMState *env, uint32_t reg, uint32_t length)
 	return;
 }
 
-static bool atomic_flag = false;
+extern bool atomic_flag;
 
 void HELPER(qsim_callback)(void)
 {

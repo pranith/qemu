@@ -8301,7 +8301,8 @@ void gen_intermediate_code(CPUX86State *env, TranslationBlock *tb)
 		}
 
         pc_ptr = disas_insn(env, dc, pc_ptr);
-        *ilen_arg = pc_ptr - pc_start;
+	if (qsim_gen_callbacks)
+		*ilen_arg = pc_ptr - pc_start;
         num_insns++;
         /* stop translation if indicated */
         if (dc->is_jmp)
