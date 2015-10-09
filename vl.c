@@ -56,8 +56,6 @@ int main(int argc, char **argv)
 #endif
 #endif /* CONFIG_SDL */
 
-#define ARM64 1
-
 #ifdef CONFIG_COCOA
 #undef main
 #define main qemu_main
@@ -259,6 +257,8 @@ trans_cb_t  qsim_trans_cb  = NULL;
 
 bool qsim_gen_callbacks = false;
 bool qsim_sys_callbacks = false;
+
+bool atomic_flag = false;
 
 uint64_t	qsim_host_addr;
 uint64_t	qsim_phys_addr;
@@ -3028,7 +3028,6 @@ void qemu_init(qemu_ramdesc_t *ram,
     char arm_kernel_path[1024];
     char arm_initrd_path[1024];
     char arm_sd_path[1024];
-    char arm_img_options[1024];
     char n_cpus[16];
 
     snprintf(n_cpus, sizeof(n_cpus), "%d", ncpus);
@@ -3049,7 +3048,8 @@ void qemu_init(qemu_ramdesc_t *ram,
 		"-append", "root=/dev/mmcblk0p2",
 		NULL
 	};
-#elif defined(ARM64)
+#elif defined(QSIM_ARM64)
+    char arm_img_options[1024];
     strcat(arm_kernel_path, "/../arm64_images/vmlinuz");
     strcat(arm_initrd_path, "/../arm64_images/initrd.img");
     strcat(arm_sd_path, "/../arm64_images/arm64disk.qcow2");
@@ -3077,10 +3077,11 @@ void qemu_init(qemu_ramdesc_t *ram,
 		NULL
 	};
 
-#elif defined(X86_64)
+#elif defined(QSIM_X86)
+    qsim_gen_callbacks = 1;
     // Assemble argv based on given arguments.
     const char *argv[] = {
-      "qemu", "-L", "qemu-0.12.3/pc-bios", "-no-hpet",
+      "qemu", "-L", "/home/pranith/progs/qsim/qemu/pc-bios", "-no-hpet",
       "-monitor", "/dev/null", "-nographic", "-serial", "/dev/null",
       "-no-acpi", "-no-hpet", "-m", ram_size, NULL
     };
