@@ -3134,10 +3134,15 @@ void qemu_init(qemu_ramdesc_t *ram,
 	};
 
 #elif defined(QSIM_X86)
+    char bios_path[1024];
+
+    strcpy(bios_path, qsim_prefix);
+    strcat(bios_path, "/qemu/pc-bios");
+
     qsim_gen_callbacks = 1;
     // Assemble argv based on given arguments.
     const char *argv[] = {
-      "qemu", "-L", "/home/pranith/progs/qsim/qemu/pc-bios", "-no-hpet",
+      "qemu", "-L", bios_path, "-no-hpet",
       "-monitor", "/dev/null", "-nographic", "-serial", "/dev/null",
       "-no-acpi", "-no-hpet", "-m", ram_size, NULL
     };
