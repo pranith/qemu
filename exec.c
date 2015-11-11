@@ -188,6 +188,8 @@ static pthread_mutex_t qsim_irq_lock    = PTHREAD_MUTEX_INITIALIZER;
 
 
 int interrupt(uint8_t vec) {
+
+    return 0;
   int rvec = 0;
 
   pthread_mutex_lock(&qsim_irq_lock);
