@@ -292,6 +292,8 @@ void set_gen_cbs  (bool state) {
   qsim_gen_callbacks = state;
 }
 
+extern void checkcontext(void);
+
 // Generate callbacks for system/application instructions only
 void set_sys_cbs  (bool state) {
   qsim_sys_callbacks = state;
@@ -1953,6 +1955,7 @@ uint64_t run(uint64_t insts)
     qsim_icount = insts;
     
     swapcontext(&main_context, &qemu_context);
+    checkcontext();
     
     return insts - qsim_icount;
 }
@@ -3087,7 +3090,8 @@ void qemu_init(qemu_ramdesc_t *ram,
     strcat(initrd_path, "/../x86_64_images/initrd.img");
     strcat(disk_path, "/../x86_64_images/x86.img");
 
-    qsim_gen_callbacks = 0;
+    // TODO: per process callbacks
+    qsim_sys_callbacks = 1;
     // Assemble argv based on given arguments.
     const char *argv[] = {
         "qemu", "-no-hpet", "-no-acpi", 
@@ -3133,6 +3137,7 @@ void qemu_init(qemu_ramdesc_t *ram,
     makecontext(&qemu_context, qsim_loop_main, 0);
     // start initial boot - subtle signal issues if we do not start right away
     swapcontext(&main_context, &qemu_context);
+    checkcontext();
 }
 
 int qsim_qemu_main(int argc, const char **argv, char **envp)
