@@ -143,16 +143,28 @@ void helper_into(CPUX86State *env, int next_eip_addend)
 void helper_cpuid(CPUX86State *env)
 {
     uint32_t eax, ebx, ecx, edx;
+    X86CPU *cpu = x86_env_get_cpu(env);
+    CPUState *cs = CPU(cpu);
 
     eax = (uint32_t)env->regs[R_EAX];
-    eax &= 0xfffffff0;
+
+    if (eax == 0xaaaaaaaa) {
+        tb_flush(cs);
+        qsim_gen_callbacks = true;
+        printf("Enabling callback generation.\n");
+    } else if (eax == 0xfa11dead) {
+        tb_flush(cs);
+        qsim_gen_callbacks = false;
+        printf("Disabling callback generation.\n");
+    }
 
     if (qsim_gen_callbacks && qsim_magic_cb && qsim_magic_cb(qsim_id, env->regs[R_EAX]))
-      swapcontext(&qemu_context, &main_context);
+        swapcontext(&qemu_context, &main_context);
 
+    eax &= 0xfffffff0;
     cpu_svm_check_intercept_param(env, SVM_EXIT_CPUID, 0);
 
-    if (1 || eax == 0x40000000 || eax == 0x80000000 || eax == 0) {
+    if (eax == 0x40000000 || eax == 0x80000000 || eax == 0) {
         cpu_x86_cpuid(env, (uint32_t)env->regs[R_EAX],
                 (uint32_t)env->regs[R_ECX],
                 &eax, &ebx, &ecx, &edx);
