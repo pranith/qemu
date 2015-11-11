@@ -76,28 +76,41 @@ TCGv_i32 hret32;
 extern int qsim_id;
 
 #define QSIM_STORE(name, ldname, bytes, d, a, i, mop)               \
-   (hret = tcg_temp_new_i64(),                                      \
-   tcg_gen_qemu_##ldname(hret, a, i, mop),                          \
-   gen_helper_store_callback_pre(cpu_env, a,                  \
-                                 tcg_const_i32(bytes), d),          \
-   tcg_gen_qemu_##name(d, a, i, mop),                               \
-   gen_helper_store_callback_post(cpu_env, a,                 \
-                                 tcg_const_i32(bytes), d),          \
-   tcg_temp_free_i64(hret)                                          )
+({                                                                  \
+    if (qsim_gen_callbacks) {                                       \
+        hret = tcg_temp_new_i64();                                  \
+        tcg_gen_qemu_##ldname(hret, a, i, mop);                     \
+        gen_helper_store_callback_pre(cpu_env, a,                   \
+                                 tcg_const_i32(bytes), d);          \
+   }                                                                \
+   tcg_gen_qemu_##name(d, a, i, mop);                               \
+   if (qsim_gen_callbacks) {                                        \
+        gen_helper_store_callback_post(cpu_env, a,                  \
+                                 tcg_const_i32(bytes), d);          \
+        tcg_temp_free_i64(hret);                                    \
+   }                                                                \
+ })
 
 /* The qemu_ld has to be performed twice, once before and once after the
  * callback. This has unfortunate performance penalties, but this allows the
  * callback to modify the value being read and keeps the callback itself from
  * causing page faults.
  */
-#define QSIM_LOAD(name, bytes, d, a, i, mop)                                \
-  (hret = tcg_temp_new_i64(),                                               \
-   a_ = tcg_temp_new_i64(),                                                 \
-   tcg_gen_qemu_##name(d, a, i, mop),                                       \
-   gen_helper_load_callback_pre(cpu_env, a, tcg_const_i32(bytes), tcg_const_i32(0)),    \
-   tcg_gen_qemu_##name(d, a, i, mop),                                       \
-   gen_helper_load_callback_post(cpu_env, a, tcg_const_i32(bytes), tcg_const_i32(0)),   \
-   tcg_temp_free_i64(hret)                                                  )
+#define QSIM_LOAD(name, bytes, d, a, i, mop)                        \
+do {                                                                \
+    if (qsim_gen_callbacks) {                                       \
+        hret = tcg_temp_new_i64();                                  \
+        a_ = tcg_temp_new_i64();                                    \
+        gen_helper_load_callback_pre(cpu_env, a,                    \
+                        tcg_const_i32(bytes), tcg_const_i32(0));    \
+    }                                                               \
+    tcg_gen_qemu_##name(d, a, i, mop);                              \
+    if (qsim_gen_callbacks) {                                       \
+        gen_helper_load_callback_post(cpu_env, a,                   \
+                        tcg_const_i32(bytes), tcg_const_i32(0));    \
+        tcg_temp_free_i64(hret);                                    \
+    }                                                               \
+} while(0)
 
 #define QSIM_REG_READ(reg, size)                                              \
    (gen_helper_reg_read_callback(cpu_env, tcg_const_i32(reg), tcg_const_i32(size))) 
@@ -107,26 +120,34 @@ extern int qsim_id;
 
 #define tcg_gen_qsim_st_tl(data, addr, idx, mop)                \
 do {                                                            \
-    hret = tcg_temp_new_i64();                                  \
-    tcg_gen_qemu_ld_tl(hret, addr, idx, mop);                   \
-    gen_helper_store_callback_pre(cpu_env, addr,          \
+    if (qsim_gen_callbacks) {                                   \
+        hret = tcg_temp_new_i64();                              \
+        tcg_gen_qemu_ld_tl(hret, addr, idx, mop);               \
+        gen_helper_store_callback_pre(cpu_env, addr,            \
             tcg_const_i32(1 << (idx & MO_SIZE)), data);         \
+    }                                                           \
     tcg_gen_qemu_st_tl(data, addr, idx, mop);                   \
-    gen_helper_store_callback_post(cpu_env, addr,         \
+    if (qsim_gen_callbacks) {                                   \
+        gen_helper_store_callback_post(cpu_env, addr,           \
             tcg_const_i32(1 << (idx & MO_SIZE)), data);         \
-    tcg_temp_free_i64(hret);                                    \
+        tcg_temp_free_i64(hret);                                \
+    }                                                           \
 } while (0)
 
 #define tcg_gen_qsim_ld_tl(data, addr, idx, mop)                \
 do {                                                            \
+    if (qsim_gen_callbacks) {                                   \
     hret = tcg_temp_new_i64();                                  \
     tcg_gen_qemu_ld_tl(hret, addr, idx, mop);                   \
-    gen_helper_load_callback_pre(cpu_env, addr,           \
+    gen_helper_load_callback_pre(cpu_env, addr,                 \
             tcg_const_i32(1 << (idx & MO_SIZE)), tcg_const_i32(0));               \
+    }                                                           \
     tcg_gen_qemu_ld_tl(data, addr, idx, mop);                   \
+    if (qsim_gen_callbacks) {                                   \
     gen_helper_load_callback_post(cpu_env, addr,          \
             tcg_const_i32(1 << (idx & MO_SIZE)), tcg_const_i32(0));               \
     tcg_temp_free_i64(hret);                                    \
+    }                                                           \
 } while (0)
 
 #define tcg_gen_qemu_ld_i32(dst, addr, idx, mop) \
@@ -426,7 +447,7 @@ static inline TCGMemOp mo_b_d32(int b, TCGMemOp ot)
 
 static void gen_op_mov_reg_v(TCGMemOp ot, int reg, TCGv t0)
 {
-    int ot_size;
+    int ot_size __attribute__((unused));
     switch(ot) {
     case MO_8:
         ot_size = 1;
@@ -2381,7 +2402,6 @@ static inline int insn_const_size(TCGMemOp ot)
 
 static inline void gen_goto_tb(DisasContext *s, int tb_num, target_ulong eip)
 {
-#if 0
     TranslationBlock *tb;
     target_ulong pc;
 
@@ -2395,8 +2415,6 @@ static inline void gen_goto_tb(DisasContext *s, int tb_num, target_ulong eip)
         gen_jmp_im(eip);
         tcg_gen_exit_tb((uintptr_t)tb + tb_num);
     } else {
-#endif
-    {
         /* jump to another page: currently not optimized */
         gen_jmp_im(eip);
         gen_eob(s);

@@ -29,6 +29,7 @@ extern uint64_t qsim_icount;
 extern io_cb_t qsim_io_cb;
 extern magic_cb_t qsim_magic_cb;
 extern int qsim_id;
+extern bool qsim_gen_callbacks;
 
 extern qsim_ucontext_t main_context;
 extern qsim_ucontext_t qemu_context;
@@ -47,7 +48,7 @@ void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outb: port=0x%04x, data=%02x\n", port, data);
 #else
-    if (qsim_io_cb) qsim_io_cb(qsim_id, port, 1, 1, data);
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(qsim_id, port, 1, 1, data);
     address_space_stb(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -60,7 +61,7 @@ target_ulong helper_inb(CPUX86State *env, uint32_t port)
     return 0;
 #else
     uint32_t *p = NULL;
-    if (qsim_io_cb)
+    if (qsim_gen_callbacks && qsim_io_cb)
 		p = qsim_io_cb(qsim_id, port, 1, 0, 0);
 
     if (!p)
@@ -76,7 +77,7 @@ void helper_outw(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outw: port=0x%04x, data=%04x\n", port, data);
 #else
-    if (qsim_io_cb) qsim_io_cb(qsim_id, port, 2, 1, data);
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(qsim_id, port, 2, 1, data);
     address_space_stw(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -89,7 +90,7 @@ target_ulong helper_inw(CPUX86State *env, uint32_t port)
     return 0;
 #else
     uint32_t *p = NULL;
-    if (qsim_io_cb)
+    if (qsim_gen_callbacks && qsim_io_cb)
 		p = qsim_io_cb(qsim_id, port, 2, 0, 0);
 
     if (!p)
@@ -105,7 +106,7 @@ void helper_outl(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outw: port=0x%04x, data=%08x\n", port, data);
 #else
-    if (qsim_io_cb) qsim_io_cb(qsim_id, port, 4, 1, data);
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(qsim_id, port, 4, 1, data);
     address_space_stl(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -118,7 +119,7 @@ target_ulong helper_inl(CPUX86State *env, uint32_t port)
     return 0;
 #else
     uint32_t *p = NULL;
-    if (qsim_io_cb)
+    if (qsim_gen_callbacks && qsim_io_cb)
 		p = qsim_io_cb(qsim_id, port, 4, 0, 0);
     if (!p)
 		return address_space_ldl(&address_space_io, port,
@@ -154,12 +155,12 @@ void helper_cpuid(CPUX86State *env)
     eax = (uint32_t)env->regs[R_EAX];
     eax &= 0xfffffff0;
 
-    if (qsim_magic_cb && qsim_magic_cb(qsim_id, env->regs[R_EAX]))
+    if (qsim_gen_callbacks && qsim_magic_cb && qsim_magic_cb(qsim_id, env->regs[R_EAX]))
       swapcontext(&qemu_context, &main_context);
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_CPUID, 0);
 
-    if ( eax == 0x40000000 || eax == 0x80000000 || eax == 0) {
+    if (1 || eax == 0x40000000 || eax == 0x80000000 || eax == 0) {
         cpu_x86_cpuid(env, (uint32_t)env->regs[R_EAX],
                 (uint32_t)env->regs[R_ECX],
                 &eax, &ebx, &ecx, &edx);
@@ -287,7 +288,7 @@ void helper_rdtsc(CPUX86State *env)
     }
     cpu_svm_check_intercept_param(env, SVM_EXIT_RDTSC, 0);
 
-    val = 0;//cpu_get_tsc(env) + env->tsc_offset;
+    val = cpu_get_tsc(env) + env->tsc_offset;
     env->regs[R_EAX] = (uint32_t)(val);
     env->regs[R_EDX] = (uint32_t)(val >> 32);
 }
@@ -328,10 +329,12 @@ void helper_wrmsr(CPUX86State *env)
     val = ((uint32_t)env->regs[R_EAX]) |
         ((uint64_t)((uint32_t)env->regs[R_EDX]) << 32);
 
+    /*
     printf("MSR Write 0x%08x, val=%08llx\n",
            (unsigned)env->regs[R_ECX], (((unsigned long
                        long)(unsigned)env->regs[R_EDX])<<32) |
                                       env->regs[R_EAX]);
+                                      */
 
     switch ((uint32_t)env->regs[R_ECX]) {
     case MSR_IA32_SYSENTER_CS:
@@ -484,7 +487,7 @@ void helper_rdmsr(CPUX86State *env)
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_MSR, 0);
 
-    printf("MSR Read 0x%08x\n", (unsigned)env->regs[R_ECX]);
+    //printf("MSR Read 0x%08x\n", (unsigned)env->regs[R_ECX]);
 
     switch ((uint32_t)env->regs[R_ECX]) {
     case MSR_IA32_SYSENTER_CS:
