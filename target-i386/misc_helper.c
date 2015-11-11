@@ -152,14 +152,16 @@ void helper_cpuid(CPUX86State *env)
         tb_flush(cs);
         qsim_gen_callbacks = true;
         printf("Enabling callback generation.\n");
-    } else if (eax == 0xfa11dead) {
-        tb_flush(cs);
-        qsim_gen_callbacks = false;
-        printf("Disabling callback generation.\n");
     }
 
     if (qsim_gen_callbacks && qsim_magic_cb && qsim_magic_cb(qsim_id, env->regs[R_EAX]))
         swapcontext(&qemu_context, &main_context);
+
+    if (eax == 0xfa11dead) {
+        tb_flush(cs);
+        qsim_gen_callbacks = false;
+        printf("Disabling callback generation.\n");
+    }
 
     eax &= 0xfffffff0;
     cpu_svm_check_intercept_param(env, SVM_EXIT_CPUID, 0);
