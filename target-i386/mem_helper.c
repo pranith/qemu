@@ -23,7 +23,6 @@
 
 #include "qsim-vm.h"
 #include "qsim-context.h"
-/* broken thread support */
 
 extern bool atomic_flag;
 static int atomic_locked;
@@ -58,7 +57,7 @@ void helper_lock(void)
     atomic_flag = 1;
     atomic_locked = 0;
     // Suspend execution immediately if the atomic callback returns nonzero
-    if (qsim_atomic_cb && qsim_atomic_cb(qsim_id))
+    if (qsim_gen_callbacks && qsim_atomic_cb && qsim_atomic_cb(qsim_id))
         swapcontext(&qemu_context, &main_context);
 }
 
@@ -189,7 +188,7 @@ void helper_atomic_callback(void)
 {
     atomic_flag = !atomic_flag;
     /* if atomic callback returns non-zero, suspend execution */
-    if (qsim_atomic_cb && qsim_atomic_cb(qsim_id))
+    if (qsim_gen_callbacks && qsim_atomic_cb && qsim_atomic_cb(qsim_id))
         swapcontext(&qemu_context, &main_context);
 
     return;
@@ -204,19 +203,20 @@ void set_reg(int r, uint64_t val);
 
 void helper_reg_read_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 {
-	if (qsim_reg_cb)
+	if (qsim_gen_callbacks && qsim_reg_cb)
 		qsim_reg_cb(qsim_id, reg, size, 0);
 	return;
 }
 
 void helper_reg_write_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 {
-  if (qsim_reg_cb)
+  if (qsim_gen_callbacks && qsim_reg_cb)
 	  qsim_reg_cb(qsim_id, reg, size, 1);
   return;
 }
 
 uint64_t get_reg(CPUX86State *env, int r) {
+    return 0;
     CPUX86State *cpu = (CPUX86State *)first_cpu;
     switch (r) {
         case QSIM_RAX:    return cpu->regs[R_EAX];
@@ -299,6 +299,8 @@ static inline void qsim_update_seg(int seg) {
 }
 
 void set_reg(int r, uint64_t val) {
+
+    return;
     CPUX86State *cpu = (CPUX86State *)first_cpu;
 
     switch (r) {
@@ -443,8 +445,8 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
     }
 
 	// TODO: pid based callbacks
-	if (!qsim_sys_callbacks)
-		return;
+    if (!qsim_sys_callbacks)
+        return;
 
     qsim_eip = vaddr;
 
@@ -452,9 +454,9 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
         // Using our own now because qemu_ram_addr_from_host had some weird
         // results.
         //qsim_phys_addr = qsim_ram_addr_from_host((void *)qsim_host_addr);
-		uint8_t *buf;
+        uint8_t *buf;
 
-		buf = get_host_vaddr(env, vaddr, length);
+        buf = get_host_vaddr(env, vaddr, length);
         qsim_inst_cb(qsim_id, vaddr, 0, length, buf, type);
     }
 
