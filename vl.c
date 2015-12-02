@@ -246,7 +246,7 @@ static struct {
     { .driver = "virtio-vga",           .flag = &default_vga       },
 };
 
-int qsim_vm_id, qsim_cur_cpu, qsim_id, qsim_memop_flag = 0;
+int qsim_vm_id, qsim_id, qsim_memop_flag = 0;
 
 static void qsim_loop_main(void);
 static int  qsim_qemu_main(int argc, const char **argv, char **envp);
@@ -274,9 +274,6 @@ uint64_t    qsim_tpid     = 0;
 qsim_ucontext_t main_context;
 qsim_ucontext_t qemu_context;
 
-qemu_ramdesc_t *qsim_ram;
-
-int qsim_qemu_is_slave;
 void *qemu_stack;
 
 const size_t QEMU_STACK_SIZE = 16*(1<<20);
@@ -3079,102 +3076,10 @@ static void set_memory_options(uint64_t *ram_slots, ram_addr_t *maxram_size,
     }
 }
 
-void qemu_init(qemu_ramdesc_t *ram,
-               const char* ram_size,
-               int cpu_id, int ncpus)
+void qemu_init(const char* argv[])
 {
-    const char *qsim_prefix = getenv("QSIM_PREFIX");
-    char kernel_path[1024];
-    char initrd_path[1024];
-    char disk_path[1024];
-    char n_cpus[16];
-
-    snprintf(n_cpus, sizeof(n_cpus), "%d", ncpus);
-    strcpy(kernel_path, qsim_prefix);
-    strcpy(initrd_path, qsim_prefix);
-    strcpy(disk_path, qsim_prefix);
-#ifdef ARM32
-    strcat(kernel_path, "/../arm_images/vmlinuz-3.2.0-4-vexpress");
-    strcat(initrd_path, "/../arm_images/initrd.img-3.2.0-4-vexpress");
-    strcat(disk_path, "/../arm_images/armdisk.img");
-
-	const char *argv[] = {
-		"qemu", "-monitor", "/dev/null",
-		"-m", ram_size, "-M", "vexpress-a9",
-		"-kernel", kernel_path,
-		"-initrd", initrd_path,
-		"-sd", disk_path,
-		"-append", "root=/dev/mmcblk0p2",
-		NULL
-	};
-#elif defined(QSIM_ARM64)
-    char arm_img_options[1024];
-    strcat(kernel_path, "/../arm64_images/vmlinuz");
-    strcat(initrd_path, "/../arm64_images/initrd.img");
-    strcat(disk_path, "/../arm64_images/arm64disk.qcow2");
-
-    strcpy(arm_img_options, "file=");
-    strcat(arm_img_options, disk_path);
-    strcat(arm_img_options, ",id=coreimg,cache=unsafe,if=none");
-
-    const char *argv[] = {
-        "qemu", 
-        "-m", ram_size, "-M", "virt",
-        "-cpu", "cortex-a57",
-        "-global", "virtio-blk-device.scsi=off",
-        "-device", "virtio-scsi-device,id=scsi",
-        "-drive",  arm_img_options,
-        "-device", "scsi-hd,drive=coreimg",
-        "-netdev", "user,id=unet",
-        "-device", "virtio-net-device,netdev=unet",
-        "-kernel", kernel_path,
-        "-initrd", initrd_path,
-        "-append", "root=/dev/sda2 nowatchdog rcupdate.rcu_cpu_stall_suppress=1",
-        "-display", "sdl",
-        "-nographic",
-        "-redir", "tcp:2222::22",
-        "-smp", n_cpus,
-        NULL
-    };
-
-#elif defined(QSIM_X86)
-    char bios_path[1024];
-
-    strcpy(bios_path, qsim_prefix);
-    strcat(bios_path, "/qemu/pc-bios");
-    strcat(kernel_path, "/../x86_64_images/vmlinuz");
-    strcat(initrd_path, "/../x86_64_images/initrd.img");
-    strcat(disk_path, "/../x86_64_images/x86.img");
-
-    // TODO: per process callbacks
-    qsim_sys_callbacks = 1;
-    // Assemble argv based on given arguments.
-    const char *argv[] = {
-        "qemu", "-no-hpet", "-no-acpi", 
-        "-L", bios_path,
-        "-m", ram_size,
-        "-hda",  disk_path,
-        "-kernel", kernel_path,
-        "-initrd", initrd_path,
-        "-append", "root=/dev/sda1 console=ttyAMA0,115200 console=tty"
-        " console=ttyS0 nowatchdog rcupdate.rcu_cpu_stall_suppress=1",
-        "-display", "sdl",
-        "-nographic",
-        "-redir", "tcp:2223::22",
-        "-smp", n_cpus,
-        //"--enable-kvm",
-        NULL
-    };
-#endif
-
     int argc;
     for (argc = 0; argv[argc] != NULL; argc++);
-
-    // Set qsim-specific variables.
-    qsim_cur_cpu       = cpu_id & 0xffff;
-    qsim_id            = cpu_id;
-    qsim_ram           = ram;
-    qsim_qemu_is_slave = (ram != NULL);
 
     // Call main with newly assembled argv.
     qsim_qemu_main(argc, argv, (char**)environ);
