@@ -1209,6 +1209,8 @@ static void handle_even_inj(CPUX86State *env, int intno, int is_int,
 }
 #endif
 
+extern bool qsim_gen_callbacks;
+
 /*
  * Begin execution of an interruption. is_int is TRUE if coming from
  * the int instruction. next_eip is the env->eip value AFTER the interrupt
@@ -1219,14 +1221,14 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
 {
     CPUX86State *env = &cpu->env;
     CPUState *cs = CPU(x86_env_get_cpu(env));
-	qsim_id = cs->cpu_index;
+    qsim_id = cs->cpu_index;
 
     if (atomic_flag) helper_unlock();
     if (nonatomic_locked) {
         nonatomic_locked = 0;
     }
 
-    if (qsim_int_cb != NULL && qsim_int_cb(qsim_id, intno) && is_int) {
+    if (qsim_gen_callbacks && qsim_int_cb != NULL && qsim_int_cb(qsim_id, intno) && is_int) {
         env->eip = next_eip;
         return;
     }
