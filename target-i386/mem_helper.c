@@ -42,8 +42,11 @@ extern bool qsim_sys_callbacks;
 
 extern int qsim_id;
 extern int qsim_memop_flag;
+extern uint64_t qsim_tpid, curr_tpid[32];
 
 extern qsim_ucontext_t main_context, qemu_context;
+
+extern int get_cpuid(CPUX86State *env);
 
 CPUState *qsim_cpu;
 
@@ -191,9 +194,15 @@ void tlb_fill(CPUState *cs, target_ulong addr, int is_write, int mmu_idx,
 #include "qsim-context.h"
 #include "qsim-x86-regs.h"
 
+extern void *qemu_get_ram_ptr(ram_addr_t addr);
+
 void helper_atomic_callback(void)
 {
     atomic_flag = !atomic_flag;
+    // pid based callbacks
+    if (!qsim_sys_callbacks && curr_tpid[qsim_id] != qsim_tpid)
+        return;
+
     /* if atomic callback returns non-zero, suspend execution */
     if (qsim_gen_callbacks && qsim_atomic_cb && qsim_atomic_cb(qsim_id))
         swapcontext(&qemu_context, &main_context);
@@ -210,16 +219,24 @@ void set_reg(int r, uint64_t val);
 
 void helper_reg_read_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 {
+    // pid based callbacks
+    if (!qsim_sys_callbacks && curr_tpid[get_cpuid(env)] != qsim_tpid)
+        return;
+
 	if (qsim_gen_callbacks && qsim_reg_cb)
-		qsim_reg_cb(qsim_id, reg, size, 0);
+		qsim_reg_cb(get_cpuid(env), reg, size, 0);
 	return;
 }
 
 void helper_reg_write_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 {
-  if (qsim_gen_callbacks && qsim_reg_cb)
-	  qsim_reg_cb(qsim_id, reg, size, 1);
-  return;
+    // pid based callbacks
+    if (!qsim_sys_callbacks && curr_tpid[get_cpuid(env)] != qsim_tpid)
+        return;
+
+    if (qsim_gen_callbacks && qsim_reg_cb)
+        qsim_reg_cb(get_cpuid(env), reg, size, 1);
+    return;
 }
 
 uint64_t get_reg(CPUX86State *env, int r) {
@@ -397,8 +414,6 @@ void set_reg(int r, uint64_t val) {
     }
 }
 
-extern void *qemu_get_ram_ptr(ram_addr_t addr);
-
 static uint8_t *get_host_vaddr(CPUX86State *env, uint64_t vaddr, uint32_t length)
 {
     hwaddr phys_addr, addr1, l = length;
@@ -431,8 +446,8 @@ done:
 void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
         uint32_t length, uint32_t type)
 {
-	CPUState *cs = CPU(x86_env_get_cpu(env));
-	qsim_id = cs->cpu_index;
+    CPUState *cs = CPU(x86_env_get_cpu(env));
+    qsim_id = cs->cpu_index;
     if (atomic_flag || nonatomic_locked) {
         printf("!!!! %p: Inst helper while holding lock. !!!!\n", (void*)qsim_eip);
     }
@@ -451,20 +466,21 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
         swapcontext(&qemu_context, &main_context);
     }
 
-	// TODO: pid based callbacks
-    if (!qsim_sys_callbacks)
+    // pid based callbacks
+    if (!qsim_sys_callbacks && curr_tpid[qsim_id] != qsim_tpid)
+        return;
+
+    // for now, only enable userspace instruction callbacks
+    if (vaddr & 0xffffffff00000000)
         return;
 
     qsim_eip = vaddr;
 
     if (qsim_inst_cb != NULL) {
-        // Using our own now because qemu_ram_addr_from_host had some weird
-        // results.
-        //qsim_phys_addr = qsim_ram_addr_from_host((void *)qsim_host_addr);
         uint8_t *buf;
 
         buf = get_host_vaddr(env, vaddr, length);
-        qsim_inst_cb(qsim_id, vaddr, 0, length, buf, type);
+        qsim_inst_cb(qsim_id, vaddr, (uint64_t)buf, length, buf, type);
     }
 
     return;
@@ -473,8 +489,9 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
 static void memop_callback(CPUX86State *env, target_ulong vaddr,
         target_ulong size, int type)
 {
-	if (!qsim_sys_callbacks)
-		return;
+    // pid based callbacks
+    if (!qsim_sys_callbacks && curr_tpid[get_cpuid(env)] != qsim_tpid)
+        return;
 
 	if (!qsim_mem_cb)
 		return;
