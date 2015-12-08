@@ -29,7 +29,7 @@
 extern uint64_t qsim_icount;
 extern io_cb_t qsim_io_cb;
 extern magic_cb_t qsim_magic_cb;
-extern bool qsim_gen_callbacks;
+extern bool qsim_gen_callbacks, qsim_sys_callbacks;
 
 extern qsim_ucontext_t main_context;
 extern qsim_ucontext_t qemu_context;
@@ -163,7 +163,11 @@ void helper_cpuid(CPUX86State *env)
         tb_flush(cs);
         qsim_gen_callbacks = true;
         qsim_tpid = curr_tpid[cpu_id];
-        printf("Enabling callback generation.\n");
+        printf("Enabling callback generation ");
+        if (qsim_sys_callbacks)
+            printf("systemwide.\n");
+        else
+            printf("for pid %ld.\n", qsim_tpid);
     }
 
     if ((eax & 0xffff0000) == 0xc75c0000) {

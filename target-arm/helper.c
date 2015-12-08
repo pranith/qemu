@@ -747,16 +747,16 @@ extern qsim_ucontext_t qemu_context;
 static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                        uint64_t value)
 {
-	ARMCPU *cpu = arm_env_get_cpu(env);
-	CPUState *cs = CPU(cpu);
+    ARMCPU *cpu = arm_env_get_cpu(env);
+    CPUState *cs = CPU(cpu);
 
-	qsim_id = cs->cpu_index;
-	if (value == 0xaaaaaaaa) { // start
-		qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
-		tb_flush(cs);
-		qsim_gen_callbacks = true;
+    qsim_id = cs->cpu_index;
+    if (value == 0xaaaaaaaa) { // start
+        qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
+        tb_flush(cs);
+        qsim_gen_callbacks = true;
 
-		printf("Enabling callback generation ");
+        printf("Enabling callback generation ");
 		if (qsim_sys_callbacks)
 			printf("systemwide.\n");
 		else
@@ -764,10 +764,11 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 	} else if (value == 0xfa11dead) {
 		tb_flush(cs);
 		qsim_gen_callbacks = false;
+		printf("Disabling callback generation\n");
 	}
 
     if (qsim_magic_cb && qsim_magic_cb(qsim_id, value))
-      swapcontext(&qemu_context, &main_context);
+        swapcontext(&qemu_context, &main_context);
 
     pmccntr_sync(env);
 
