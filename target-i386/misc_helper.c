@@ -34,7 +34,7 @@ extern qsim_ucontext_t main_context;
 extern qsim_ucontext_t qemu_context;
 
 void checkcontext(void);
-int get_cpuid(CPUX86State *env);
+int get_cpuidx(CPUX86State *env);
 CPUX86State* get_env(int cpu_idx);
 
 void checkcontext(void)
@@ -44,7 +44,7 @@ void checkcontext(void)
         printf("swapped context");
 }
 
-int get_cpuid(CPUX86State *env)
+int get_cpuidx(CPUX86State *env)
 {
     X86CPU *cpu = x86_env_get_cpu(env);
     CPUState *cs = CPU(cpu);
@@ -68,7 +68,7 @@ void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outb: port=0x%04x, data=%02x\n", port, data);
 #else
-    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuid(env), port, 1, 1, data);
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuidx(env), port, 1, 1, data);
     address_space_stb(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -82,7 +82,7 @@ target_ulong helper_inb(CPUX86State *env, uint32_t port)
 #else
     uint32_t *p = NULL;
     if (qsim_gen_callbacks && qsim_io_cb)
-		p = qsim_io_cb(get_cpuid(env), port, 1, 0, 0);
+		p = qsim_io_cb(get_cpuidx(env), port, 1, 0, 0);
 
     if (!p)
 		return address_space_ldub(&address_space_io, port,
@@ -97,7 +97,7 @@ void helper_outw(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outw: port=0x%04x, data=%04x\n", port, data);
 #else
-    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuid(env), port, 2, 1, data);
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuidx(env), port, 2, 1, data);
     address_space_stw(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -111,7 +111,7 @@ target_ulong helper_inw(CPUX86State *env, uint32_t port)
 #else
     uint32_t *p = NULL;
     if (qsim_gen_callbacks && qsim_io_cb)
-		p = qsim_io_cb(get_cpuid(env), port, 2, 0, 0);
+		p = qsim_io_cb(get_cpuidx(env), port, 2, 0, 0);
 
     if (!p)
 		return address_space_lduw(&address_space_io, port,
@@ -126,7 +126,7 @@ void helper_outl(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outw: port=0x%04x, data=%08x\n", port, data);
 #else
-    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuid(env), port, 4, 1, data);
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuidx(env), port, 4, 1, data);
     address_space_stl(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -140,7 +140,7 @@ target_ulong helper_inl(CPUX86State *env, uint32_t port)
 #else
     uint32_t *p = NULL;
     if (qsim_gen_callbacks && qsim_io_cb)
-		p = qsim_io_cb(get_cpuid(env), port, 4, 0, 0);
+		p = qsim_io_cb(get_cpuidx(env), port, 4, 0, 0);
     if (!p)
 		return address_space_ldl(&address_space_io, port,
 				                 cpu_get_mem_attrs(env), NULL);
