@@ -184,8 +184,8 @@ void helper_atomic_callback(void)
     return;
 }
 
-uint8_t mem_rd(int cpu_idx, uint64_t paddr);
-void mem_wr(int cpu_idx, uint64_t paddr, uint8_t value);
+uint8_t mem_rd(uint64_t paddr);
+void mem_wr(uint64_t paddr, uint8_t value);
 uint8_t mem_rd_virt(int cpu_idx, uint64_t vaddr);
 void mem_wr_virt(int cpu_idx, uint64_t vaddr, uint8_t val);
 uint64_t get_reg(int cpu_idx, int r);
@@ -513,9 +513,9 @@ void helper_load_callback_post(CPUX86State *env, uint64_t vaddr, uint32_t size, 
 }
 
 
-uint8_t mem_rd(int cpu_idx, uint64_t paddr)
+uint8_t mem_rd(uint64_t paddr)
 {
-    CPUX86State *env = get_env(cpu_idx);
+    CPUX86State *env = get_env(0);
     CPUState *cs = CPU(x86_env_get_cpu(env));
     int bak = qsim_memop_flag;
     qsim_memop_flag = 1;
@@ -524,9 +524,9 @@ uint8_t mem_rd(int cpu_idx, uint64_t paddr)
     return b;
 }
 
-void mem_wr(int cpu_idx, uint64_t paddr, uint8_t value)
+void mem_wr(uint64_t paddr, uint8_t value)
 {
-    CPUX86State *env = get_env(cpu_idx);
+    CPUX86State *env = get_env(0);
     CPUState *cs = CPU(x86_env_get_cpu(env));
     int bak = qsim_memop_flag;
     qsim_memop_flag = 1;

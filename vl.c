@@ -3040,9 +3040,6 @@ void qemu_init(const char* argv[])
     qemu_context.uc_stack.ss_size = QEMU_STACK_SIZE;
     qemu_context.uc_link = &main_context;
     makecontext(&qemu_context, qsim_loop_main, 0);
-    // start initial boot - subtle signal issues if we do not start right away
-    swapcontext(&main_context, &qemu_context);
-    checkcontext();
 }
 
 int qsim_qemu_main(int argc, const char **argv, char **envp)

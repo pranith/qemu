@@ -92,6 +92,10 @@ void qemu_savevm_state_cancel(void);
 uint64_t qemu_savevm_state_pending(QEMUFile *f, uint64_t max_size);
 int qemu_loadvm_state(QEMUFile *f);
 
+void qsim_savevm_state(const char *filename);
+int qsim_loadvm_state(const char *filename);
+void qsim_savevm_state_bh(void *opaque);
+
 typedef enum DisplayType
 {
     DT_DEFAULT,
