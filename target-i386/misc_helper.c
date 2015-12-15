@@ -186,7 +186,7 @@ void helper_cpuid(CPUX86State *env)
         qsim_tpid = curr_tpid[cpu_id];
         printf("Enabling callback generation ");
         if (qsim_sys_callbacks)
-            printf("systemwide.\n");
+            printf("system wide.\n");
         else
             printf("for pid %ld.\n", qsim_tpid);
     }
