@@ -111,10 +111,10 @@ do {                                                                \
     }                                                               \
 } while(0)
 
-#define QSIM_REG_READ(reg, size)                                              \
+#define QSIM_REG_READ(reg, size)                                             \
    (gen_helper_reg_read_callback(cpu_env, tcg_const_i32(reg), tcg_const_i32(size))) 
 
-#define QSIM_REG_WRITE(reg, size)                                             \
+#define QSIM_REG_WRITE(reg, size)                                            \
    (gen_helper_reg_write_callback(cpu_env, tcg_const_i32(reg), tcg_const_i32(size)))
 
 #define tcg_gen_qsim_st_tl(data, addr, idx, mop)                \
@@ -5085,38 +5085,38 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
             qsim_set_inst_type(QSIM_INST_INTDIV);
             switch(ot) {
             case MO_8:
-                QSIM_REG_READ(QSIM_RAX, 1);
-                QSIM_REG_READ(QSIM_RDX, 1);
+                QSIM_REG_READ(QSIM_X86_RAX, 1);
+                QSIM_REG_READ(QSIM_X86_RDX, 1);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_divb_AL(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 1);
-                QSIM_REG_WRITE(QSIM_RDX, 1);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 1);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 1);
                 break;
             case MO_16:
-                QSIM_REG_READ(QSIM_RAX, 2);
-                QSIM_REG_READ(QSIM_RDX, 2);
+                QSIM_REG_READ(QSIM_X86_RAX, 2);
+                QSIM_REG_READ(QSIM_X86_RDX, 2);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_divw_AX(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 2);
-                QSIM_REG_WRITE(QSIM_RDX, 2);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 2);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 2);
                 break;
             default:
             case MO_32:
-                QSIM_REG_READ(QSIM_RAX, 4);
-                QSIM_REG_READ(QSIM_RDX, 4);
+                QSIM_REG_READ(QSIM_X86_RAX, 4);
+                QSIM_REG_READ(QSIM_X86_RDX, 4);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_divl_EAX(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 4);
-                QSIM_REG_WRITE(QSIM_RDX, 4);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 4);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 4);
                 break;
 #ifdef TARGET_X86_64
             case MO_64:
-                QSIM_REG_READ(QSIM_RAX, 8);
-                QSIM_REG_READ(QSIM_RDX, 8);
+                QSIM_REG_READ(QSIM_X86_RAX, 8);
+                QSIM_REG_READ(QSIM_X86_RDX, 8);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_divq_EAX(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 8);
-                QSIM_REG_WRITE(QSIM_RDX, 8);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 8);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 8);
                 break;
 #endif
             }
@@ -5124,38 +5124,38 @@ static target_ulong disas_insn(CPUX86State *env, DisasContext *s,
         case 7: /* idiv */
             switch(ot) {
             case MO_8:
-                QSIM_REG_READ(QSIM_RAX, 1);
-                QSIM_REG_READ(QSIM_RDX, 1);
+                QSIM_REG_READ(QSIM_X86_RAX, 1);
+                QSIM_REG_READ(QSIM_X86_RDX, 1);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_idivb_AL(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 1);
-                QSIM_REG_WRITE(QSIM_RDX, 1);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 1);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 1);
                 break;
             case MO_16:
-                QSIM_REG_READ(QSIM_RAX, 2);
-                QSIM_REG_READ(QSIM_RDX, 2);
+                QSIM_REG_READ(QSIM_X86_RAX, 2);
+                QSIM_REG_READ(QSIM_X86_RDX, 2);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_idivw_AX(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 2);
-                QSIM_REG_WRITE(QSIM_RDX, 2);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 2);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 2);
                 break;
             default:
             case MO_32:
-                QSIM_REG_READ(QSIM_RAX, 4);
-                QSIM_REG_READ(QSIM_RDX, 4);
+                QSIM_REG_READ(QSIM_X86_RAX, 4);
+                QSIM_REG_READ(QSIM_X86_RDX, 4);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_idivl_EAX(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 4);
-                QSIM_REG_WRITE(QSIM_RDX, 4);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 4);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 4);
                 break;
 #ifdef TARGET_X86_64
             case MO_64:
-                QSIM_REG_READ(QSIM_RAX, 8);
-                QSIM_REG_READ(QSIM_RDX, 8);
+                QSIM_REG_READ(QSIM_X86_RAX, 8);
+                QSIM_REG_READ(QSIM_X86_RDX, 8);
                 gen_jmp_im(pc_start - s->cs_base);
                 gen_helper_idivq_EAX(cpu_env, cpu_T[0]);
-                QSIM_REG_WRITE(QSIM_RAX, 8);
-                QSIM_REG_WRITE(QSIM_RDX, 8);
+                QSIM_REG_WRITE(QSIM_X86_RAX, 8);
+                QSIM_REG_WRITE(QSIM_X86_RDX, 8);
                 break;
 #endif
             }

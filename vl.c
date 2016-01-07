@@ -246,7 +246,7 @@ static struct {
     { .driver = "virtio-vga",           .flag = &default_vga       },
 };
 
-int qsim_vm_id, qsim_id, qsim_memop_flag = 0;
+int qsim_id;
 
 static void qsim_loop_main(void);
 static int  qsim_qemu_main(int argc, const char **argv, char **envp);
