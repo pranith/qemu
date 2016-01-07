@@ -41,7 +41,6 @@ extern bool qsim_gen_callbacks;
 extern bool qsim_sys_callbacks;
 
 extern int qsim_id;
-extern int qsim_memop_flag;
 extern uint64_t qsim_tpid, curr_tpid[32];
 
 extern qsim_ucontext_t main_context, qemu_context;
@@ -244,76 +243,87 @@ void helper_reg_write_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 uint64_t get_reg(int cpu_idx, int r) {
     CPUX86State *cpu = get_env(cpu_idx);
     switch (r) {
-        case QSIM_RAX:    return cpu->regs[R_EAX];
-        case QSIM_RCX:    return cpu->regs[R_ECX];
-        case QSIM_RDX:    return cpu->regs[R_EDX];
-        case QSIM_RBX:    return cpu->regs[R_EBX];
-        case QSIM_RSP:    return cpu->regs[R_ESP];
-        case QSIM_RBP:    return cpu->regs[R_EBP];
-        case QSIM_RSI:    return cpu->regs[R_ESI];
-        case QSIM_RDI:    return cpu->regs[R_EDI];
-        case QSIM_FP0:    return cpu->fpregs[0].mmx.q;
-        case QSIM_FP1:    return cpu->fpregs[1].mmx.q;
-        case QSIM_FP2:    return cpu->fpregs[2].mmx.q;
-        case QSIM_FP3:    return cpu->fpregs[3].mmx.q;
-        case QSIM_FP4:    return cpu->fpregs[4].mmx.q;
-        case QSIM_FP5:    return cpu->fpregs[5].mmx.q;
-        case QSIM_FP6:    return cpu->fpregs[6].mmx.q;
-        case QSIM_FP7:    return cpu->fpregs[7].mmx.q;
-        case QSIM_FPSP:   return cpu->fpstt;
-        case QSIM_ES :    return cpu->segs[R_ES ].selector;
-        case QSIM_ESB:    return cpu->segs[R_ES ].base;
-        case QSIM_ESL:    return cpu->segs[R_ES ].limit;
-        case QSIM_ESF:    return cpu->segs[R_ES ].flags;
-        case QSIM_CS :    return cpu->segs[R_CS ].selector;
-        case QSIM_CSB:    return cpu->segs[R_CS ].base;
-        case QSIM_CSL:    return cpu->segs[R_CS ].limit;
-        case QSIM_CSF:    return cpu->segs[R_CS ].flags;
-        case QSIM_SS :    return cpu->segs[R_SS ].selector;
-        case QSIM_SSB:    return cpu->segs[R_SS ].base;
-        case QSIM_SSL:    return cpu->segs[R_SS ].limit;
-        case QSIM_SSF:    return cpu->segs[R_SS ].flags;
-        case QSIM_DS :    return cpu->segs[R_DS ].selector;
-        case QSIM_DSB:    return cpu->segs[R_DS ].base;
-        case QSIM_DSL:    return cpu->segs[R_DS ].limit;
-        case QSIM_DSF:    return cpu->segs[R_DS ].flags;
-        case QSIM_FS :    return cpu->segs[R_FS ].selector;
-        case QSIM_FSB:    return cpu->segs[R_FS ].base;
-        case QSIM_FSL:    return cpu->segs[R_FS ].limit;
-        case QSIM_FSF:    return cpu->segs[R_FS ].flags;
-        case QSIM_GS :    return cpu->segs[R_GS ].selector;
-        case QSIM_GSB:    return cpu->segs[R_GS ].base;
-        case QSIM_GSL:    return cpu->segs[R_GS ].limit;
-        case QSIM_GSF:    return cpu->segs[R_GS ].flags;
-        case QSIM_RIP:    return qsim_eip;
-        case QSIM_CR0:    return cpu->cr  [0    ];
-        case QSIM_CR2:    return cpu->cr  [2    ];
-        case QSIM_CR3:    return cpu->cr  [3    ];
-        case QSIM_CR4:    return cpu->cr  [4    ];
-        case QSIM_RFLAGS: return cpu_compute_eflags(cpu);
-        case QSIM_GDTB:   return cpu->gdt.base;
-        case QSIM_IDTB:   return cpu->idt.base;
-        case QSIM_GDTL:   return cpu->gdt.limit;
-        case QSIM_IDTL:   return cpu->idt.limit;
-        case QSIM_TR:     return cpu->tr.selector;
-        case QSIM_TRB:    return cpu->tr.base;
-        case QSIM_TRL:    return cpu->tr.limit;
-        case QSIM_TRF:    return cpu->tr.flags;
-        case QSIM_LDT:    return cpu->ldt.selector;
-        case QSIM_LDTB:   return cpu->ldt.base;
-        case QSIM_LDTL:   return cpu->ldt.limit;
-        case QSIM_LDTF:   return cpu->ldt.flags;
-        case QSIM_DR6:    return cpu->dr[6];
-        case QSIM_DR7:    return cpu->dr[7];
-        case QSIM_HFLAGS: return cpu->hflags;
-        case QSIM_HFLAGS2:return cpu->hflags2;
-        case QSIM_SE_CS:  return cpu->sysenter_cs;
-        case QSIM_SE_SP:  return cpu->sysenter_esp;
-        case QSIM_SE_IP:  return cpu->sysenter_eip;
+        case QSIM_X86_RAX:    return cpu->regs[R_EAX];
+        case QSIM_X86_RCX:    return cpu->regs[R_ECX];
+        case QSIM_X86_RDX:    return cpu->regs[R_EDX];
+        case QSIM_X86_RBX:    return cpu->regs[R_EBX];
+        case QSIM_X86_RSP:    return cpu->regs[R_ESP];
+        case QSIM_X86_RBP:    return cpu->regs[R_EBP];
+        case QSIM_X86_RSI:    return cpu->regs[R_ESI];
+        case QSIM_X86_RDI:    return cpu->regs[R_EDI];
+        case QSIM_X86_R8 :    return cpu->regs[8];
+        case QSIM_X86_R9 :    return cpu->regs[9];
+        case QSIM_X86_R10:    return cpu->regs[10];
+        case QSIM_X86_R11:    return cpu->regs[11];
+        case QSIM_X86_R12:    return cpu->regs[12];
+        case QSIM_X86_R13:    return cpu->regs[13];
+        case QSIM_X86_R14:    return cpu->regs[14];
+        case QSIM_X86_R15:    return cpu->regs[15];
+        case QSIM_X86_FP0:    return cpu->fpregs[0].mmx.q;
+        case QSIM_X86_FP1:    return cpu->fpregs[1].mmx.q;
+        case QSIM_X86_FP2:    return cpu->fpregs[2].mmx.q;
+        case QSIM_X86_FP3:    return cpu->fpregs[3].mmx.q;
+        case QSIM_X86_FP4:    return cpu->fpregs[4].mmx.q;
+        case QSIM_X86_FP5:    return cpu->fpregs[5].mmx.q;
+        case QSIM_X86_FP6:    return cpu->fpregs[6].mmx.q;
+        case QSIM_X86_FP7:    return cpu->fpregs[7].mmx.q;
+	      /* TODO: Implement the following
+        case QSIM_X86_FPSP:   return cpu->fpstt;
+        case QSIM_X86_ES :    return cpu->segs[R_ES ].selector;
+        case QSIM_X86_ESB:    return cpu->segs[R_ES ].base;
+        case QSIM_X86_ESL:    return cpu->segs[R_ES ].limit;
+        case QSIM_X86_ESF:    return cpu->segs[R_ES ].flags;
+        case QSIM_X86_CS :    return cpu->segs[R_CS ].selector;
+        case QSIM_X86_CSB:    return cpu->segs[R_CS ].base;
+        case QSIM_X86_CSL:    return cpu->segs[R_CS ].limit;
+        case QSIM_X86_CSF:    return cpu->segs[R_CS ].flags;
+        case QSIM_X86_SS :    return cpu->segs[R_SS ].selector;
+        case QSIM_X86_SSB:    return cpu->segs[R_SS ].base;
+        case QSIM_X86_SSL:    return cpu->segs[R_SS ].limit;
+        case QSIM_X86_SSF:    return cpu->segs[R_SS ].flags;
+        case QSIM_X86_DS :    return cpu->segs[R_DS ].selector;
+        case QSIM_X86_DSB:    return cpu->segs[R_DS ].base;
+        case QSIM_X86_DSL:    return cpu->segs[R_DS ].limit;
+        case QSIM_X86_DSF:    return cpu->segs[R_DS ].flags;
+        case QSIM_X86_FS :    return cpu->segs[R_FS ].selector;
+        case QSIM_X86_FSB:    return cpu->segs[R_FS ].base;
+        case QSIM_X86_FSL:    return cpu->segs[R_FS ].limit;
+        case QSIM_X86_FSF:    return cpu->segs[R_FS ].flags;
+        case QSIM_X86_GS :    return cpu->segs[R_GS ].selector;
+        case QSIM_X86_GSB:    return cpu->segs[R_GS ].base;
+        case QSIM_X86_GSL:    return cpu->segs[R_GS ].limit;
+        case QSIM_X86_GSF:    return cpu->segs[R_GS ].flags;
+        case QSIM_X86_RIP:    return QSIM_X86_eip;
+        case QSIM_X86_CR0:    return cpu->cr  [0    ];
+        case QSIM_X86_CR2:    return cpu->cr  [2    ];
+        case QSIM_X86_CR3:    return cpu->cr  [3    ];
+        case QSIM_X86_CR4:    return cpu->cr  [4    ];
+        case QSIM_X86_RFLAGS: return cpu_compute_eflags(cpu);
+        case QSIM_X86_GDTB:   return cpu->gdt.base;
+        case QSIM_X86_IDTB:   return cpu->idt.base;
+        case QSIM_X86_GDTL:   return cpu->gdt.limit;
+        case QSIM_X86_IDTL:   return cpu->idt.limit;
+        case QSIM_X86_TR:     return cpu->tr.selector;
+        case QSIM_X86_TRB:    return cpu->tr.base;
+        case QSIM_X86_TRL:    return cpu->tr.limit;
+        case QSIM_X86_TRF:    return cpu->tr.flags;
+        case QSIM_X86_LDT:    return cpu->ldt.selector;
+        case QSIM_X86_LDTB:   return cpu->ldt.base;
+        case QSIM_X86_LDTL:   return cpu->ldt.limit;
+        case QSIM_X86_LDTF:   return cpu->ldt.flags;
+        case QSIM_X86_DR6:    return cpu->dr[6];
+        case QSIM_X86_DR7:    return cpu->dr[7];
+        case QSIM_X86_HFLAGS: return cpu->hflags;
+        case QSIM_X86_HFLAGS2:return cpu->hflags2;
+        case QSIM_X86_SE_CS:  return cpu->sysenter_cs;
+        case QSIM_X86_SE_SP:  return cpu->sysenter_esp;
+        case QSIM_X86_SE_IP:  return cpu->sysenter_eip;
+        */
         default       :   return 0xbadbadbadbadbadbULL;
     }
 } 
 
+/*
 static inline void qsim_update_seg(int seg) {
     CPUX86State *cpu = (CPUX86State *)first_cpu;
     cpu_x86_load_seg_cache(cpu, seg, 
@@ -322,94 +332,105 @@ static inline void qsim_update_seg(int seg) {
             cpu->segs[seg].limit,
             cpu->segs[seg].flags);
 }
+*/
 
 void set_reg(int c, int r, uint64_t val) {
 
     CPUX86State *cpu = get_env(c);
 
     switch (r) {
-        case QSIM_RAX:    cpu->regs[R_EAX]          = val;      break;
-        case QSIM_RCX:    cpu->regs[R_ECX]          = val;      break;
-        case QSIM_RDX:    cpu->regs[R_EDX]          = val;      break;
-        case QSIM_RBX:    cpu->regs[R_EBX]          = val;      break;
-        case QSIM_RSP:    cpu->regs[R_ESP]          = val;      break;
-        case QSIM_RBP:    cpu->regs[R_EBP]          = val;      break;
-        case QSIM_RSI:    cpu->regs[R_ESI]          = val;      break;
-        case QSIM_RDI:    cpu->regs[R_EDI]          = val;      break;
-        case QSIM_FP0:    cpu->fpregs[0].mmx.q      = val;      break;
-        case QSIM_FP1:    cpu->fpregs[1].mmx.q      = val;      break;
-        case QSIM_FP2:    cpu->fpregs[2].mmx.q      = val;      break;
-        case QSIM_FP3:    cpu->fpregs[3].mmx.q      = val;      break;
-        case QSIM_FP4:    cpu->fpregs[4].mmx.q      = val;      break;
-        case QSIM_FP5:    cpu->fpregs[5].mmx.q      = val;      break;
-        case QSIM_FP6:    cpu->fpregs[6].mmx.q      = val;      break;
-        case QSIM_FP7:    cpu->fpregs[7].mmx.q      = val;      break;
-        case QSIM_FPSP:   cpu->fpstt                = val;      break;
-        case QSIM_ES :    cpu->segs[R_ES ].selector = val;      break;
-        case QSIM_ESB:    cpu->segs[R_ES ].base     = val;      break;
-        case QSIM_ESL:    cpu->segs[R_ES ].limit    = val;      break;
-        case QSIM_ESF:    cpu->segs[R_ES ].flags    = val;
-                          qsim_update_seg(R_ES);                      break;
-        case QSIM_CS :    cpu->segs[R_CS ].selector = val;
+        case QSIM_X86_RAX:    cpu->regs[R_EAX]          = val;      break;
+        case QSIM_X86_RCX:    cpu->regs[R_ECX]          = val;      break;
+        case QSIM_X86_RDX:    cpu->regs[R_EDX]          = val;      break;
+        case QSIM_X86_RBX:    cpu->regs[R_EBX]          = val;      break;
+        case QSIM_X86_RSP:    cpu->regs[R_ESP]          = val;      break;
+        case QSIM_X86_RBP:    cpu->regs[R_EBP]          = val;      break;
+        case QSIM_X86_RSI:    cpu->regs[R_ESI]          = val;      break;
+        case QSIM_X86_RDI:    cpu->regs[R_EDI]          = val;      break;
+        case QSIM_X86_R8 :    cpu->regs[8]              = val;      break;
+        case QSIM_X86_R9 :    cpu->regs[9]              = val;      break;
+        case QSIM_X86_R10:    cpu->regs[10]             = val;      break;
+        case QSIM_X86_R11:    cpu->regs[11]             = val;      break;
+        case QSIM_X86_R12:    cpu->regs[12]             = val;      break;
+        case QSIM_X86_R13:    cpu->regs[13]             = val;      break;
+        case QSIM_X86_R14:    cpu->regs[14]             = val;      break;
+        case QSIM_X86_R15:    cpu->regs[15]             = val;      break;
+        case QSIM_X86_FP0:    cpu->fpregs[0].mmx.q      = val;      break;
+        case QSIM_X86_FP1:    cpu->fpregs[1].mmx.q      = val;      break;
+        case QSIM_X86_FP2:    cpu->fpregs[2].mmx.q      = val;      break;
+        case QSIM_X86_FP3:    cpu->fpregs[3].mmx.q      = val;      break;
+        case QSIM_X86_FP4:    cpu->fpregs[4].mmx.q      = val;      break;
+        case QSIM_X86_FP5:    cpu->fpregs[5].mmx.q      = val;      break;
+        case QSIM_X86_FP6:    cpu->fpregs[6].mmx.q      = val;      break;
+        case QSIM_X86_FP7:    cpu->fpregs[7].mmx.q      = val;      break;
+        /*
+        case QSIM_X86_FPSP:   cpu->fpstt                = val;      break;
+        case QSIM_X86_ES :    cpu->segs[R_ES ].selector = val;      break;
+        case QSIM_X86_ESB:    cpu->segs[R_ES ].base     = val;      break;
+        case QSIM_X86_ESL:    cpu->segs[R_ES ].limit    = val;      break;
+        case QSIM_X86_ESF:    cpu->segs[R_ES ].flags    = val;
+                          QSIM_X86_update_seg(R_ES);                      break;
+        case QSIM_X86_CS :    cpu->segs[R_CS ].selector = val;
                           cpu->segs[R_CS ].base     = val << 4; break;
-        case QSIM_CSB:    cpu->segs[R_CS ].base     = val;      break;
-        case QSIM_CSL:    cpu->segs[R_CS ].limit    = val;      break;
-        case QSIM_CSF:    cpu->segs[R_CS ].flags    = val;
-                          qsim_update_seg(R_CS);                      break;
-        case QSIM_SS :    cpu->segs[R_SS ].selector = val;
+        case QSIM_X86_CSB:    cpu->segs[R_CS ].base     = val;      break;
+        case QSIM_X86_CSL:    cpu->segs[R_CS ].limit    = val;      break;
+        case QSIM_X86_CSF:    cpu->segs[R_CS ].flags    = val;
+                          QSIM_X86_update_seg(R_CS);                      break;
+        case QSIM_X86_SS :    cpu->segs[R_SS ].selector = val;
                           cpu->segs[R_SS ].base     = val << 4; break;
-        case QSIM_SSB:    cpu->segs[R_SS ].base     = val;      break;
-        case QSIM_SSL:    cpu->segs[R_SS ].limit    = val;      break;
-        case QSIM_SSF:    cpu->segs[R_SS ].flags    = val;
-                          qsim_update_seg(R_SS);                      break;
-        case QSIM_DS :    cpu->segs[R_DS ].selector = val;
+        case QSIM_X86_SSB:    cpu->segs[R_SS ].base     = val;      break;
+        case QSIM_X86_SSL:    cpu->segs[R_SS ].limit    = val;      break;
+        case QSIM_X86_SSF:    cpu->segs[R_SS ].flags    = val;
+                          QSIM_X86_update_seg(R_SS);                      break;
+        case QSIM_X86_DS :    cpu->segs[R_DS ].selector = val;
                           cpu->segs[R_DS ].base     = val << 4; break;
-        case QSIM_DSB:    cpu->segs[R_DS ].base     = val;      break;
-        case QSIM_DSL:    cpu->segs[R_DS ].limit    = val;      break;
-        case QSIM_DSF:    cpu->segs[R_DS ].flags    = val;
-                          qsim_update_seg(R_DS);                      break;
-        case QSIM_FS :    cpu->segs[R_FS ].selector = val;
+        case QSIM_X86_DSB:    cpu->segs[R_DS ].base     = val;      break;
+        case QSIM_X86_DSL:    cpu->segs[R_DS ].limit    = val;      break;
+        case QSIM_X86_DSF:    cpu->segs[R_DS ].flags    = val;
+                          QSIM_X86_update_seg(R_DS);                      break;
+        case QSIM_X86_FS :    cpu->segs[R_FS ].selector = val;
                           cpu->segs[R_FS ].base     = val << 4; break;
-        case QSIM_FSB:    cpu->segs[R_FS ].base     = val;      break;
-        case QSIM_FSL:    cpu->segs[R_FS ].limit    = val;      break;
-        case QSIM_FSF:    cpu->segs[R_FS ].flags    = val;
-                          qsim_update_seg(R_FS);                      break;
-        case QSIM_GS :    cpu->segs[R_GS ].selector = val;
+        case QSIM_X86_FSB:    cpu->segs[R_FS ].base     = val;      break;
+        case QSIM_X86_FSL:    cpu->segs[R_FS ].limit    = val;      break;
+        case QSIM_X86_FSF:    cpu->segs[R_FS ].flags    = val;
+                          QSIM_X86_update_seg(R_FS);                      break;
+        case QSIM_X86_GS :    cpu->segs[R_GS ].selector = val;
                           cpu->segs[R_GS ].base     = val << 4; break;
-        case QSIM_GSB:    cpu->segs[R_GS ].base     = val;      break;
-        case QSIM_GSL:    cpu->segs[R_GS ].limit    = val;      break;
-        case QSIM_GSF:    cpu->segs[R_GS ].flags    = val;
-                          qsim_update_seg(R_GS);                      break;
-        case QSIM_RIP:    cpu->eip                  = val;      break;
-        case QSIM_CR0:    helper_write_crN(cpu, 0, val);                   break;
-        case QSIM_CR2:
+        case QSIM_X86_GSB:    cpu->segs[R_GS ].base     = val;      break;
+        case QSIM_X86_GSL:    cpu->segs[R_GS ].limit    = val;      break;
+        case QSIM_X86_GSF:    cpu->segs[R_GS ].flags    = val;
+                          QSIM_X86_update_seg(R_GS);                      break;
+        case QSIM_X86_RIP:    cpu->eip                  = val;      break;
+        case QSIM_X86_CR0:    helper_write_crN(cpu, 0, val);                   break;
+        case QSIM_X86_CR2:
                           helper_write_crN(cpu, 2, val);                   break;
-        case QSIM_CR3:
+        case QSIM_X86_CR3:
                           helper_write_crN(cpu, 3, val);                   break;
-        case QSIM_CR4:
+        case QSIM_X86_CR4:
                           helper_write_crN(cpu, 4, val);                   break;
-        case QSIM_GDTB:   cpu->gdt.base             = val;      break;
-        case QSIM_GDTL:   cpu->gdt.limit            = val;      break;
-        case QSIM_IDTB:   cpu->idt.base             = val;      break;
-        case QSIM_IDTL:   cpu->idt.limit            = val;      break;
-        case QSIM_RFLAGS: cpu_load_eflags(cpu, val, ~(CC_O | CC_S | CC_Z | CC_A |
+        case QSIM_X86_GDTB:   cpu->gdt.base             = val;      break;
+        case QSIM_X86_GDTL:   cpu->gdt.limit            = val;      break;
+        case QSIM_X86_IDTB:   cpu->idt.base             = val;      break;
+        case QSIM_X86_IDTL:   cpu->idt.limit            = val;      break;
+        case QSIM_X86_RFLAGS: cpu_load_eflags(cpu, val, ~(CC_O | CC_S | CC_Z | CC_A |
                                                       CC_P | CC_C | DF_MASK));
                           break;
-        case QSIM_TR:     cpu->tr.selector          = val;      break;
-        case QSIM_TRB:    cpu->tr.base              = val;      break;
-        case QSIM_TRL:    cpu->tr.limit             = val;      break;
-        case QSIM_TRF:    cpu->tr.flags             = val;      break;
-        case QSIM_LDT:    cpu->ldt.selector         = val;      break;
-        case QSIM_LDTB:   cpu->ldt.base             = val;      break;
-        case QSIM_LDTL:   cpu->ldt.limit            = val;      break;
-        case QSIM_LDTF:   cpu->ldt.flags            = val;      break;
-        case QSIM_DR6:    cpu->dr[6]                = val;      break;
-        case QSIM_DR7:    cpu->dr[7]                = val;      break;
-        case QSIM_HFLAGS: cpu->hflags               = val;      break;
-        case QSIM_HFLAGS2:cpu->hflags2              = val;      break;
-        case QSIM_SE_CS:  cpu->sysenter_cs          = val;      break;
-        case QSIM_SE_SP:  cpu->sysenter_esp         = val;      break;
-        case QSIM_SE_IP:  cpu->sysenter_eip         = val;      break;
+        case QSIM_X86_TR:     cpu->tr.selector          = val;      break;
+        case QSIM_X86_TRB:    cpu->tr.base              = val;      break;
+        case QSIM_X86_TRL:    cpu->tr.limit             = val;      break;
+        case QSIM_X86_TRF:    cpu->tr.flags             = val;      break;
+        case QSIM_X86_LDT:    cpu->ldt.selector         = val;      break;
+        case QSIM_X86_LDTB:   cpu->ldt.base             = val;      break;
+        case QSIM_X86_LDTL:   cpu->ldt.limit            = val;      break;
+        case QSIM_X86_LDTF:   cpu->ldt.flags            = val;      break;
+        case QSIM_X86_DR6:    cpu->dr[6]                = val;      break;
+        case QSIM_X86_DR7:    cpu->dr[7]                = val;      break;
+        case QSIM_X86_HFLAGS: cpu->hflags               = val;      break;
+        case QSIM_X86_HFLAGS2:cpu->hflags2              = val;      break;
+        case QSIM_X86_SE_CS:  cpu->sysenter_cs          = val;      break;
+        case QSIM_X86_SE_SP:  cpu->sysenter_esp         = val;      break;
+        case QSIM_X86_SE_IP:  cpu->sysenter_eip         = val;      break;
+        */
         default:          break;
     }
 }
@@ -551,10 +572,7 @@ uint8_t mem_rd(uint64_t paddr)
 {
     CPUX86State *env = get_env(0);
     CPUState *cs = CPU(x86_env_get_cpu(env));
-    int bak = qsim_memop_flag;
-    qsim_memop_flag = 1;
     uint8_t b = ldub_phys(cs->as, paddr); // ldub_kernel(vaddr)*/0;
-    qsim_memop_flag = bak;
     return b;
 }
 
@@ -562,28 +580,19 @@ void mem_wr(uint64_t paddr, uint8_t value)
 {
     CPUX86State *env = get_env(0);
     CPUState *cs = CPU(x86_env_get_cpu(env));
-    int bak = qsim_memop_flag;
-    qsim_memop_flag = 1;
     stb_phys(cs->as, paddr, value);
-    qsim_memop_flag = bak;
 }
 
 uint8_t mem_rd_virt(int cpu_idx, uint64_t vaddr) {
     CPUX86State *env = get_env(cpu_idx);
     uint8_t *buf;
-    int bak = qsim_memop_flag;
-    qsim_memop_flag = 1;
     buf = get_host_vaddr(env, vaddr, 1);
-    qsim_memop_flag = bak;
     return *buf;
 }
 
 void mem_wr_virt(int cpu_idx, uint64_t vaddr, uint8_t value) {
-    int bak = qsim_memop_flag;
     uint8_t *buf;
     CPUX86State *env = get_env(cpu_idx);
-    qsim_memop_flag = 1;
     buf = get_host_vaddr(env, vaddr, 1);
     *buf = value;
-    qsim_memop_flag = bak;
 }
