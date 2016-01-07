@@ -761,11 +761,11 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 			printf("systemwide.\n");
 		else
 			printf("for pid %ld.\n", qsim_tpid);
-	} else if (value == 0xfa11dead) {
-		tb_flush(cs);
-		qsim_gen_callbacks = false;
-		printf("Disabling callback generation\n");
-	}
+    } else if (value == 0xfa11dead) {
+      tb_flush(cs);
+      qsim_gen_callbacks = false;
+      printf("Disabling callback generation\n");
+    }
 
     if (qsim_magic_cb && qsim_magic_cb(qsim_id, value))
         swapcontext(&qemu_context, &main_context);
@@ -821,6 +821,7 @@ static void pmccntr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         /* Increment once every 64 processor clock cycles */
         total_ticks /= 64;
     }
+
     env->cp15.c15_ccnt = total_ticks - value;
 }
 
