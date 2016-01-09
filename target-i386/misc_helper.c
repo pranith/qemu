@@ -180,7 +180,7 @@ void helper_cpuid(CPUX86State *env)
         if (qsim_sys_callbacks)
             printf("system wide.\n");
         else
-            printf("for pid %ld.\n", qsim_tpid);
+            printf("for pid %" PRIu64 ".\n", qsim_tpid);
     }
 
     if ((eax & 0xffff0000) == 0xc75c0000) {

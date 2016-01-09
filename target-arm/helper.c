@@ -760,7 +760,7 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 		if (qsim_sys_callbacks)
 			printf("systemwide.\n");
 		else
-			printf("for pid %ld.\n", qsim_tpid);
+			printf("for pid %" PRIu64 ".\n", qsim_tpid);
     } else if (value == 0xfa11dead) {
       tb_flush(cs);
       qsim_gen_callbacks = false;
