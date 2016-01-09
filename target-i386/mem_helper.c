@@ -471,7 +471,7 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
     qsim_id = cs->cpu_index;
 
     if (atomic_flag || nonatomic_locked) {
-        printf("!!!! %p: Inst helper while holding lock. !!!!\n", (void*)qsim_eip);
+        printf("!!!! %p: Inst helper while holding lock. !!!!\n", (void *)qsim_eip);
     }
 
     if (atomic_flag && atomic_locked) {
@@ -502,7 +502,7 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
         uint8_t *buf;
 
         buf = get_host_vaddr(env, vaddr, length);
-        qsim_inst_cb(qsim_id, vaddr, (uint64_t)buf, length, buf, type);
+        qsim_inst_cb(qsim_id, vaddr, (uintptr_t)buf, length, buf, type);
     }
 
     return;
@@ -533,7 +533,7 @@ static void memop_callback(CPUX86State *env, target_ulong vaddr,
 
       qsim_id = cs->cpu_index;
       buf = get_host_vaddr(env, vaddr, size);
-      qsim_mem_cb(qsim_id, vaddr, (uint64_t)buf, size, type);
+      qsim_mem_cb(qsim_id, vaddr, (uintptr_t)buf, size, type);
     }
 }
 
