@@ -1084,7 +1084,7 @@ static inline void memop_callback(CPUARMState *env, uint64_t addr, uint32_t size
         qsim_id = cs->cpu_index;
         buf = get_host_vaddr(env, addr, size);
         if (buf)
-            qsim_mem_cb(qsim_id, addr, (uint64_t)buf, size, type);
+            qsim_mem_cb(qsim_id, addr, (uintptr_t)buf, size, type);
     }
 }
 
