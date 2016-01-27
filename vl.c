@@ -262,6 +262,7 @@ uintptr_t	qsim_phys_addr;
 
 uint64_t    qsim_icount   = 10000000;
 uint64_t    qsim_tpid     = 0;
+uint64_t    curr_tpid[64];
 
 qsim_ucontext_t main_context;
 qsim_ucontext_t qemu_context;
@@ -3098,8 +3099,11 @@ static int global_init_func(void *opaque, QemuOpts *opts, Error **errp)
 
 void qemu_init(const char* argv[])
 {
-    int argc;
+    int argc, i;
     for (argc = 0; argv[argc] != NULL; argc++);
+
+    for (i = 0; i < 64; i++)
+        curr_tpid[i] = -1;
 
     // Call main with newly assembled argv.
     qsim_qemu_main(argc, argv, (char**)environ);
