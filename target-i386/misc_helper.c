@@ -161,7 +161,7 @@ void helper_into(CPUX86State *env, int next_eip_addend)
 }
 
 extern uint64_t qsim_tpid;
-uint64_t curr_tpid[32];
+extern uint64_t curr_tpid[64];
 
 void helper_cpuid(CPUX86State *env)
 {
