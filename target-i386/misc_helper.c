@@ -201,6 +201,7 @@ void helper_cpuid(CPUX86State *env)
 
     if (eax == 0xfa11dead) {
         tb_flush(cs);
+        qsim_tpid = -1;
         qsim_gen_callbacks = false;
         printf("Disabling callback generation.\n");
     }
