@@ -458,7 +458,7 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
     }
 
     qsim_icount--;
-    while (qsim_icount == 0) {
+    if (qsim_icount == 0) {
         qsim_swap_ctx();
     }
 
