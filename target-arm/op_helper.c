@@ -69,7 +69,7 @@ static void raise_exception(CPUARMState *env, uint32_t excp,
     env->exception.target_el = target_el;
 
     if (qsim_gen_callbacks && qsim_int_cb != NULL && qsim_int_cb(qsim_id, excp)) {
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
     }
 
     cpu_loop_exit(cs);
@@ -1053,8 +1053,7 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
 
 	qsim_icount--;
 	if (qsim_icount == 0) {
-        checkcontext();
-        swapcontext(&qemu_context, &main_context);
+            qsim_swap_ctx();
     }
 
     if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)
@@ -1141,8 +1140,7 @@ void HELPER(qsim_callback)(void)
 {
     qsim_icount--;
     if (qsim_icount == 0) {
-        checkcontext();
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
     }
 
     return;
@@ -1153,7 +1151,7 @@ void HELPER(atomic_callback)(void)
     atomic_flag = !atomic_flag;
     /* if atomic callback returns non-zero, suspend execution */
     if (qsim_atomic_cb && qsim_atomic_cb(qsim_id))
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
 
     return;
 }

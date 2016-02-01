@@ -92,6 +92,9 @@ void qemu_savevm_state_cancel(void);
 uint64_t qemu_savevm_state_pending(QEMUFile *f, uint64_t max_size);
 int qemu_loadvm_state(QEMUFile *f);
 
+// Qsim definitions
+//void qsim_swap_ctx(void);
+//void qsim_swap(void *opaque);
 void qsim_savevm_state(const char *filename);
 int qsim_loadvm_state(const char *filename);
 void qsim_savevm_state_bh(void *opaque);

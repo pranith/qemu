@@ -726,8 +726,9 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
       printf("Disabling callback generation\n");
     }
 
-    if (qsim_magic_cb && qsim_magic_cb(qsim_id, value))
-        swapcontext(&qemu_context, &main_context);
+    if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+        qsim_swap_ctx();
+    }
 
     pmccntr_sync(env);
 

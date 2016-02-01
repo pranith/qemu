@@ -197,7 +197,7 @@ void helper_cpuid(CPUX86State *env)
     }
 
     if (qsim_gen_callbacks && qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
 
     if (eax == 0xfa11dead) {
         tb_flush(cs);
@@ -224,8 +224,7 @@ void helper_qsim_callback(void)
 {
     qsim_icount--;
     if (qsim_icount == 0) {
-        checkcontext();
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
     }
 
     return;
