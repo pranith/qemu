@@ -268,7 +268,7 @@ bool atomic_flag = false;
 uintptr_t	qsim_host_addr;
 uintptr_t	qsim_phys_addr;
 
-uint64_t    qsim_icount   = 10000000;
+int64_t     qsim_icount   = 10000000;
 uint64_t    qsim_tpid     = 0;
 uint64_t    curr_tpid[64];
 
@@ -2034,6 +2034,7 @@ void qsim_swap(void *opaque)
     if (opaque) {
         qsim_swap_bh *bh = (qsim_swap_bh *)opaque;
         qemu_bh_delete(bh->swap_bh);
+        g_free(bh);
     }
     swapcontext(&qemu_context, &main_context);
     checkcontext();
