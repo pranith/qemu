@@ -1437,6 +1437,7 @@ static void tcg_exec_one(void)
             break;
     }
     CPUState *cpu = next_cpu;
+    next_cpu = NULL;
 
     qemu_clock_enable(QEMU_CLOCK_VIRTUAL,
                       (cpu->singlestep_enabled & SSTEP_NOTIMER) == 0);
