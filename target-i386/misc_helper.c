@@ -206,6 +206,12 @@ void helper_cpuid(CPUX86State *env)
         printf("Disabling callback generation.\n");
     }
 
+    if (eax == 0xb0070000) {
+        // CPU bootstrap
+        if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+          qsim_swap_ctx();
+    }
+
     eax &= 0xfffffff0;
     cpu_svm_check_intercept_param(env, SVM_EXIT_CPUID, 0);
 
