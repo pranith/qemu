@@ -1421,6 +1421,7 @@ static int tcg_cpu_exec(CPUState *cpu)
 }
 
 extern int qsim_id;
+extern bool qsim_gen_callbacks;
 
 static void tcg_exec_one(void)
 {
@@ -1450,6 +1451,8 @@ static void tcg_exec_one(void)
     }
 
     exit_request = 0;
+    if (!qsim_gen_callbacks)
+        qsim_id = (qsim_id+1) % smp_cpus;
 }
 
 static void tcg_exec_all(void)
