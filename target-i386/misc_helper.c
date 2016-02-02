@@ -188,7 +188,7 @@ void helper_cpuid(CPUX86State *env)
         curr_tpid[cpu_id] = eax & 0xffff;
     }
 
-    if (qsim_gen_callbacks && qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+    if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
         qsim_swap_ctx();
 
     if (eax == 0xfa11dead) {
@@ -196,12 +196,6 @@ void helper_cpuid(CPUX86State *env)
         qsim_tpid = -1;
         qsim_gen_callbacks = false;
         printf("Disabling callback generation.\n");
-    }
-
-    if (eax == 0xb0070000) {
-        // CPU bootstrap
-        if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
-          qsim_swap_ctx();
     }
 
     eax &= 0xfffffff0;
