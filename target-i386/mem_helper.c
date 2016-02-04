@@ -267,17 +267,21 @@ uint64_t get_reg(int cpu_idx, int r) {
         case QSIM_X86_FP5:    return cpu->fpregs[5].mmx.q;
         case QSIM_X86_FP6:    return cpu->fpregs[6].mmx.q;
         case QSIM_X86_FP7:    return cpu->fpregs[7].mmx.q;
-	      /* TODO: Implement the following
+        case QSIM_X86_CS :    return cpu->segs[R_CS].base;;
+        case QSIM_X86_SS :    return cpu->segs[R_SS].base;;
+        case QSIM_X86_CR0:    return cpu->cr[0];
+        case QSIM_X86_CR2:    return cpu->cr[2];
+        case QSIM_X86_CR3:    return cpu->cr[3];
+        case QSIM_X86_CR4:    return cpu->cr[4];
+              /* TODO: Implement the following
         case QSIM_X86_FPSP:   return cpu->fpstt;
         case QSIM_X86_ES :    return cpu->segs[R_ES ].selector;
         case QSIM_X86_ESB:    return cpu->segs[R_ES ].base;
         case QSIM_X86_ESL:    return cpu->segs[R_ES ].limit;
         case QSIM_X86_ESF:    return cpu->segs[R_ES ].flags;
-        case QSIM_X86_CS :    return cpu->segs[R_CS ].selector;
         case QSIM_X86_CSB:    return cpu->segs[R_CS ].base;
         case QSIM_X86_CSL:    return cpu->segs[R_CS ].limit;
         case QSIM_X86_CSF:    return cpu->segs[R_CS ].flags;
-        case QSIM_X86_SS :    return cpu->segs[R_SS ].selector;
         case QSIM_X86_SSB:    return cpu->segs[R_SS ].base;
         case QSIM_X86_SSL:    return cpu->segs[R_SS ].limit;
         case QSIM_X86_SSF:    return cpu->segs[R_SS ].flags;
@@ -294,10 +298,6 @@ uint64_t get_reg(int cpu_idx, int r) {
         case QSIM_X86_GSL:    return cpu->segs[R_GS ].limit;
         case QSIM_X86_GSF:    return cpu->segs[R_GS ].flags;
         case QSIM_X86_RIP:    return QSIM_X86_eip;
-        case QSIM_X86_CR0:    return cpu->cr  [0    ];
-        case QSIM_X86_CR2:    return cpu->cr  [2    ];
-        case QSIM_X86_CR3:    return cpu->cr  [3    ];
-        case QSIM_X86_CR4:    return cpu->cr  [4    ];
         case QSIM_X86_RFLAGS: return cpu_compute_eflags(cpu);
         case QSIM_X86_GDTB:   return cpu->gdt.base;
         case QSIM_X86_IDTB:   return cpu->idt.base;
