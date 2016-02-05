@@ -1121,6 +1121,8 @@ static void tcg_exec_all(void);
 static void tcg_exec_one(void);
 
 extern int run_mode;
+extern int64_t qsim_icount;
+extern void qsim_swap_ctx(void);
 
 static void *qemu_tcg_cpu_thread_fn(void *arg)
 {
@@ -1154,8 +1156,14 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     while (1) {
         if (!run_mode)
             tcg_exec_all();
-        else
+        else {
+            int64_t icount = qsim_icount;
             tcg_exec_one();
+            // swap ctx if we cannot execute any instructions
+            if (icount == qsim_icount) {
+                qsim_swap_ctx();
+            }
+        }
 
         if (use_icount) {
             int64_t deadline = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL);
