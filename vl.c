@@ -2038,10 +2038,7 @@ int run_mode = -1;
 
 uint64_t run(uint64_t insts)
 {
-    if (run_mode == -1)
-        run_mode = 0;
-    else if (run_mode == 1)
-        return 0;
+    run_mode = 0;
 
     qsim_icount = insts;
 
@@ -2053,10 +2050,7 @@ uint64_t run(uint64_t insts)
 
 uint64_t run_cpu(int cpu_id, uint64_t insts)
 {
-    if (run_mode == -1)
-        run_mode = 1;
-    else if (run_mode == 0)
-        return 0;
+    run_mode = 1;
 
     qsim_icount = insts;
     qsim_id = cpu_id;
