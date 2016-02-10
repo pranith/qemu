@@ -717,9 +717,9 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 
         printf("Enabling callback generation ");
 		if (qsim_sys_callbacks)
-			printf("systemwide.\n");
+                    printf("systemwide.\n");
 		else
-			printf("for pid %" PRIu64 ".\n", qsim_tpid);
+                    printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, qsim_id);
     } else if (value == 0xfa11dead) {
       tb_flush(cs);
       qsim_gen_callbacks = false;
