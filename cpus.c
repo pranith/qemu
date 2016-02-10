@@ -1158,9 +1158,15 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
             tcg_exec_all();
         else {
             int64_t icount = qsim_icount;
+            static int tries = 0;
             tcg_exec_one();
             // swap ctx if we cannot execute any instructions
+            // even after three tries
             if (icount == qsim_icount) {
+                tries++;
+            }
+            if (tries >= 3) {
+                tries = 0;
                 qsim_swap_ctx();
             }
         }
