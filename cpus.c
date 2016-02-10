@@ -1164,6 +1164,8 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
             // even after three tries
             if (icount == qsim_icount) {
                 tries++;
+            } else {
+                tries = 0;
             }
             if (tries >= 3) {
                 tries = 0;
@@ -1538,15 +1540,11 @@ static void tcg_exec_one(void)
     /* Account partial waits to QEMU_CLOCK_VIRTUAL.  */
     qemu_clock_warp(QEMU_CLOCK_VIRTUAL);
 
-    if (next_cpu == NULL) {
-        next_cpu = first_cpu;
-    }
-    for (; next_cpu != NULL && !exit_request; next_cpu = CPU_NEXT(next_cpu)) {
+    for (next_cpu = first_cpu; next_cpu != NULL ; next_cpu = CPU_NEXT(next_cpu)) {
         if (next_cpu->cpu_index == qsim_id)
             break;
     }
     CPUState *cpu = next_cpu;
-    next_cpu = NULL;
 
     qemu_clock_enable(QEMU_CLOCK_VIRTUAL,
                       (cpu->singlestep_enabled & SSTEP_NOTIMER) == 0);
