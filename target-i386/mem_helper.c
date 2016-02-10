@@ -41,7 +41,7 @@ extern bool qsim_gen_callbacks;
 extern bool qsim_sys_callbacks;
 
 extern int qsim_id;
-extern uint64_t qsim_tpid, curr_tpid[32];
+extern uint64_t qsim_tpid, curr_tpid[64];
 
 extern qsim_ucontext_t main_context, qemu_context;
 
