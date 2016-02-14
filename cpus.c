@@ -1083,7 +1083,7 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
             } else {
                 tries = 0;
             }
-            if (tries == 3) {
+            if (tries >= 100000) {
                 tries = 0;
                 qsim_swap_ctx();
             }
