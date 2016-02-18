@@ -2347,6 +2347,12 @@ static const TypeInfo spapr_machine_info = {
  */
 static void spapr_machine_2_6_instance_options(MachineState *machine)
 {
+<<<<<<< 115ad6b9e7a76a1ec9cd89f73182525cf8625eeb
+=======
+    savevm_skip_section_footers();
+    global_state_set_optional();
+    savevm_skip_configuration();
+>>>>>>> spapr: skip configuration section during migration of older machines
 }
 
 static void spapr_machine_2_6_class_options(MachineClass *mc)
