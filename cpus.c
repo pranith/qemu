@@ -1436,8 +1436,7 @@ static int tcg_cpu_exec(CPUState *cpu)
     return ret;
 }
 
-extern int qsim_id;
-extern bool qsim_gen_callbacks;
+extern int qsim_id, qsim_gen_callbacks;
 
 static void tcg_exec_one(void)
 {

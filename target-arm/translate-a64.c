@@ -53,7 +53,7 @@ static TCGv_i64 cpu_exclusive_test;
 static TCGv_i32 cpu_exclusive_info;
 #endif
 
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 TCGArg *itype_arg = NULL;
 
 static const char *regnames[] = {

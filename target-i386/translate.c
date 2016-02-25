@@ -39,7 +39,7 @@
 #include "qsim-func.h"
 
 extern trans_cb_t qsim_trans_cb;
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 TCGArg *itype_arg = NULL;
 TCGArg *ilen_arg  = NULL;
 
