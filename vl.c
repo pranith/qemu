@@ -283,9 +283,14 @@ void set_io_cb    (io_cb_t     cb) { qsim_io_cb     = cb; }
 void set_reg_cb   (reg_cb_t    cb) { qsim_reg_cb    = cb; }
 void set_trans_cb (trans_cb_t  cb) { qsim_trans_cb  = cb; }
 
-void set_gen_cbs  (bool state) {
+void set_gen_cbs (bool state)
+{
     // Mark all generated TBs as stale so that new TBs are generated
-    qsim_gen_callbacks++;
+    if (state) {
+        qsim_gen_callbacks++;
+    } else {
+        qsim_gen_callbacks--;
+    }
 }
 
 extern void checkcontext(void);
