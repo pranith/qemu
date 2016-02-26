@@ -959,7 +959,6 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 
     qsim_id = cs->cpu_index;
     if (value == 0xaaaaaaaa) { // start
-        printf("Enable called: %d\n", qsim_gen_callbacks);
         qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
 
         if (!qsim_gen_callbacks) {
@@ -978,7 +977,6 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         qsim_gen_callbacks++;
     } else if (value == 0xfa11dead) {
       qsim_gen_callbacks--;
-      printf("Disable called: %d\n", qsim_gen_callbacks);
 
       if (!qsim_gen_callbacks) {
           qsim_tpid = -1;
