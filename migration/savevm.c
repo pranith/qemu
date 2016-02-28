@@ -1962,6 +1962,83 @@ int qemu_loadvm_state(QEMUFile *f)
     return ret;
 }
 
+typedef struct {
+    const char* file;
+} state_file;
+
+void qsim_savevm_state(const char* filename)
+{
+    state_file *sf;
+    QEMUBH* bh;
+
+    sf = (state_file *)g_malloc0(sizeof(state_file));
+    sf->file = strdup(filename);
+
+    bh = qemu_bh_new(qsim_savevm_state_bh, sf);
+    qemu_bh_schedule(bh);
+
+    return;
+}
+
+void qsim_savevm_state_bh(void* opaque)
+{
+    state_file *sf = opaque;
+    const char *filename = sf->file;
+    g_free(sf);
+    QEMUFile *f;
+    int ret;
+    Error *local_err = NULL;
+
+    ret = global_state_store();
+    if (ret) {
+        printf("Error saving global state\n");
+        return;
+    }
+    vm_stop(RUN_STATE_SAVE_VM);
+    //global_state_store_running();
+
+    f = qemu_fopen(filename, "wb");
+    if (!f) {
+        fprintf(stderr, "Could not open state file\n");
+        return;
+    }
+    ret = qemu_savevm_state(f, &local_err);
+    qemu_fclose(f);
+    if (ret < 0) {
+        fprintf(stderr, "Could not save state\n");
+        return;
+    }
+
+    exit(0);
+
+    return;
+}
+
+int qsim_loadvm_state(const char* filename)
+{
+    QEMUFile *f;
+    int ret;
+
+    f = qemu_fopen(filename, "rb");
+    if (!f) {
+        fprintf(stderr, "Could not open state file\n");
+        return -1;
+    }
+
+    qemu_system_reset(VMRESET_SILENT);
+    migration_incoming_state_new(f);
+    ret = qemu_loadvm_state(f);
+    qemu_fclose(f);
+    migration_incoming_state_destroy();
+    if (ret < 0) {
+        fprintf(stderr, "Could not load state\n");
+        return ret;
+    }
+
+    vm_start();
+    return 0;
+}
+
 void hmp_savevm(Monitor *mon, const QDict *qdict)
 {
     BlockDriverState *bs, *bs1;
