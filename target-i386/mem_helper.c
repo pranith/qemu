@@ -46,7 +46,7 @@ extern uint64_t qsim_tpid, curr_tpid[32];
 
 extern qsim_ucontext_t main_context, qemu_context;
 
-extern int get_cpuid(CPUX86State *env);
+extern int get_cpuidx(CPUX86State *env);
 
 extern CPUX86State* get_env(int cpu_idx);
 
@@ -491,7 +491,7 @@ static void memop_callback(CPUX86State *env, target_ulong vaddr,
         target_ulong size, int type)
 {
     // pid based callbacks
-    if (!qsim_sys_callbacks && curr_tpid[get_cpuid(env)] != qsim_tpid)
+    if (!qsim_sys_callbacks && curr_tpid[get_cpuidx(env)] != qsim_tpid)
         return;
 
     if (!qsim_mem_cb)
