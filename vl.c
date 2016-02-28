@@ -265,8 +265,8 @@ bool qsim_sys_callbacks = false;
 
 bool atomic_flag = false;
 
-uint64_t	qsim_host_addr;
-uint64_t	qsim_phys_addr;
+uintptr_t	qsim_host_addr;
+uintptr_t	qsim_phys_addr;
 
 uint64_t    qsim_icount   = 10000000;
 uint64_t    qsim_tpid     = 0;
