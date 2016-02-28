@@ -2007,6 +2007,10 @@ uint64_t run_cpu(int cpu_id, uint64_t insts)
     return insts - qsim_icount;
 }
 
+typedef struct {
+    QEMUBH *swap_bh;
+} qsim_swap_bh;
+
 /* Swap out to qsim context.
  *
  * Depending on run mode, we either swap out right away or schedule a qemu
@@ -2014,18 +2018,23 @@ uint64_t run_cpu(int cpu_id, uint64_t insts)
  */
 void qsim_swap_ctx(void)
 {
-    QEMUBH *bh;
+    qsim_swap_bh *bh;
     if (!run_mode) {
         qsim_swap(NULL);
     }
     else {
-        bh = qemu_bh_new(qsim_swap, 0);
-        qemu_bh_schedule(bh);
+        bh = (qsim_swap_bh *)g_malloc0(sizeof(qsim_swap_bh));
+        bh->swap_bh = qemu_bh_new(qsim_swap, bh);
+        qemu_bh_schedule(bh->swap_bh);
     }
 }
 
 void qsim_swap(void *opaque)
 {
+    if (opaque) {
+        qsim_swap_bh *bh = (qsim_swap_bh *)opaque;
+        qemu_bh_delete(bh->swap_bh);
+    }
     swapcontext(&qemu_context, &main_context);
     checkcontext();
 }

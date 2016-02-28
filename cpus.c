@@ -1118,6 +1118,9 @@ static void *qemu_dummy_cpu_thread_fn(void *arg)
 }
 
 static void tcg_exec_all(void);
+static void tcg_exec_one(void);
+
+extern int run_mode;
 
 static void *qemu_tcg_cpu_thread_fn(void *arg)
 {
@@ -1149,7 +1152,10 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     atomic_mb_set(&exit_request, 1);
 
     while (1) {
-        tcg_exec_all();
+        if (!run_mode)
+            tcg_exec_all();
+        else
+            tcg_exec_one();
 
         if (use_icount) {
             int64_t deadline = qemu_clock_deadline_ns_all(QEMU_CLOCK_VIRTUAL);
@@ -1506,6 +1512,37 @@ static int tcg_cpu_exec(CPUState *cpu)
         replay_account_executed_instructions();
     }
     return ret;
+}
+
+extern int qsim_id;
+
+static void tcg_exec_one(void)
+{
+    int r;
+
+    /* Account partial waits to QEMU_CLOCK_VIRTUAL.  */
+    qemu_clock_warp(QEMU_CLOCK_VIRTUAL);
+
+    if (next_cpu == NULL) {
+        next_cpu = first_cpu;
+    }
+    for (; next_cpu != NULL && !exit_request; next_cpu = CPU_NEXT(next_cpu)) {
+        if (next_cpu->cpu_index == qsim_id)
+            break;
+    }
+    CPUState *cpu = next_cpu;
+
+    qemu_clock_enable(QEMU_CLOCK_VIRTUAL,
+                      (cpu->singlestep_enabled & SSTEP_NOTIMER) == 0);
+
+    if (cpu_can_run(cpu)) {
+        r = tcg_cpu_exec(cpu);
+        if (r == EXCP_DEBUG) {
+            cpu_handle_guest_debug(cpu);
+        }
+    }
+
+    exit_request = 0;
 }
 
 static void tcg_exec_all(void)
