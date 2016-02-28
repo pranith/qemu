@@ -48,7 +48,7 @@ extern qsim_ucontext_t main_context, qemu_context;
 
 extern int get_cpuid(CPUX86State *env);
 
-CPUState *qsim_cpu;
+extern CPUX86State* get_env(int cpu_idx);
 
 /* broken thread support */
 
@@ -210,38 +210,39 @@ void helper_atomic_callback(void)
     return;
 }
 
-uint8_t mem_rd(CPUX86State *env, uint64_t paddr);
-void mem_wr(CPUX86State *env, uint64_t paddr, uint8_t value);
-uint8_t mem_rd_virt(CPUX86State *env, uint64_t vaddr);
-void mem_wr_virt(CPUX86State *env, uint64_t vaddr, uint8_t val);
-uint64_t get_reg(CPUX86State *env, int r);
-void set_reg(int r, uint64_t val);
+uint8_t mem_rd(int cpu_idx, uint64_t paddr);
+void mem_wr(int cpu_idx, uint64_t paddr, uint8_t value);
+uint8_t mem_rd_virt(int cpu_idx, uint64_t vaddr);
+void mem_wr_virt(int cpu_idx, uint64_t vaddr, uint8_t val);
+uint64_t get_reg(int cpu_idx, int r);
+void set_reg(int cpu_idx, int r, uint64_t val);
 
 void helper_reg_read_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 {
     // pid based callbacks
-    if (!qsim_sys_callbacks && curr_tpid[get_cpuid(env)] != qsim_tpid)
+    if (!qsim_sys_callbacks && curr_tpid[get_cpuidx(env)] != qsim_tpid)
         return;
 
-	if (qsim_gen_callbacks && qsim_reg_cb)
-		qsim_reg_cb(get_cpuid(env), reg, size, 0);
-	return;
+    if (qsim_gen_callbacks && qsim_reg_cb)
+      qsim_reg_cb(get_cpuidx(env), reg, size, 0);
+
+    return;
 }
 
 void helper_reg_write_callback(CPUX86State *env, uint32_t reg, uint32_t size)
 {
     // pid based callbacks
-    if (!qsim_sys_callbacks && curr_tpid[get_cpuid(env)] != qsim_tpid)
+    if (!qsim_sys_callbacks && curr_tpid[get_cpuidx(env)] != qsim_tpid)
         return;
 
     if (qsim_gen_callbacks && qsim_reg_cb)
-        qsim_reg_cb(get_cpuid(env), reg, size, 1);
+        qsim_reg_cb(get_cpuidx(env), reg, size, 1);
+
     return;
 }
 
-uint64_t get_reg(CPUX86State *env, int r) {
-    return 0;
-    CPUX86State *cpu = (CPUX86State *)first_cpu;
+uint64_t get_reg(int cpu_idx, int r) {
+    CPUX86State *cpu = get_env(cpu_idx);
     switch (r) {
         case QSIM_RAX:    return cpu->regs[R_EAX];
         case QSIM_RCX:    return cpu->regs[R_ECX];
@@ -322,10 +323,9 @@ static inline void qsim_update_seg(int seg) {
             cpu->segs[seg].flags);
 }
 
-void set_reg(int r, uint64_t val) {
+void set_reg(int c, int r, uint64_t val) {
 
-    return;
-    CPUX86State *cpu = (CPUX86State *)first_cpu;
+    CPUX86State *cpu = get_env(c);
 
     switch (r) {
         case QSIM_RAX:    cpu->regs[R_EAX]          = val;      break;
@@ -448,6 +448,7 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
 {
     CPUState *cs = CPU(x86_env_get_cpu(env));
     qsim_id = cs->cpu_index;
+
     if (atomic_flag || nonatomic_locked) {
         printf("!!!! %p: Inst helper while holding lock. !!!!\n", (void*)qsim_eip);
     }
@@ -493,21 +494,21 @@ static void memop_callback(CPUX86State *env, target_ulong vaddr,
     if (!qsim_sys_callbacks && curr_tpid[get_cpuid(env)] != qsim_tpid)
         return;
 
-	if (!qsim_mem_cb)
-		return;
+    if (!qsim_mem_cb)
+      return;
 
-	// Handle unaligned page-crossing accessess as a series of aligned accesses.
-	if ((size-1)&vaddr && (vaddr&0xfff)+size >= 0x1000) {
-		memop_callback(env, vaddr,          size/2, type);
-		memop_callback(env, vaddr + size/2, size/2, type);
-	} else {
-		CPUState *cs = CPU(x86_env_get_cpu(env));
-		uint8_t *buf;
+    // Handle unaligned page-crossing accessess as a series of aligned accesses.
+    if ((size-1)&vaddr && (vaddr&0xfff)+size >= 0x1000) {
+      memop_callback(env, vaddr,          size/2, type);
+      memop_callback(env, vaddr + size/2, size/2, type);
+    } else {
+      CPUState *cs = CPU(x86_env_get_cpu(env));
+      uint8_t *buf;
 
-		qsim_id = cs->cpu_index;
-		buf = get_host_vaddr(env, vaddr, size);
-		qsim_mem_cb(qsim_id, vaddr, (uint64_t)buf, size, type);
-	}
+      qsim_id = cs->cpu_index;
+      buf = get_host_vaddr(env, vaddr, size);
+      qsim_mem_cb(qsim_id, vaddr, (uint64_t)buf, size, type);
+    }
 }
 
 void helper_store_callback_pre(CPUX86State *env, uint64_t vaddr,
@@ -538,7 +539,9 @@ void helper_load_callback_post(CPUX86State *env, uint64_t vaddr, uint32_t size, 
 }
 
 
-uint8_t mem_rd(CPUX86State *env, uint64_t paddr) {
+uint8_t mem_rd(int cpu_idx, uint64_t paddr)
+{
+    CPUX86State *env = get_env(cpu_idx);
     CPUState *cs = CPU(x86_env_get_cpu(env));
     int bak = qsim_memop_flag;
     qsim_memop_flag = 1;
@@ -547,7 +550,9 @@ uint8_t mem_rd(CPUX86State *env, uint64_t paddr) {
     return b;
 }
 
-void mem_wr(CPUX86State *env, uint64_t paddr, uint8_t value) {
+void mem_wr(int cpu_idx, uint64_t paddr, uint8_t value)
+{
+    CPUX86State *env = get_env(cpu_idx);
     CPUState *cs = CPU(x86_env_get_cpu(env));
     int bak = qsim_memop_flag;
     qsim_memop_flag = 1;
@@ -555,20 +560,22 @@ void mem_wr(CPUX86State *env, uint64_t paddr, uint8_t value) {
     qsim_memop_flag = bak;
 }
 
-uint8_t mem_rd_virt(CPUX86State *env, uint64_t vaddr) {
-    // This is known to fail on guest operating systems that support the NX bit.
+uint8_t mem_rd_virt(int cpu_idx, uint64_t vaddr) {
+    CPUX86State *env = get_env(cpu_idx);
+    uint8_t *buf;
     int bak = qsim_memop_flag;
     qsim_memop_flag = 1;
-    char b = cpu_ldub_code(env, vaddr);
+    buf = get_host_vaddr(env, vaddr, 1);
     qsim_memop_flag = bak;
-    return b;
+    return *buf;
 }
 
-void mem_wr_virt(CPUX86State *env, uint64_t vaddr, uint8_t value) {
-    // This is known to fail on guest operating systems that support the NX bit.
+void mem_wr_virt(int cpu_idx, uint64_t vaddr, uint8_t value) {
     int bak = qsim_memop_flag;
+    uint8_t *buf;
+    CPUX86State *env = get_env(cpu_idx);
     qsim_memop_flag = 1;
-    cpu_ldub_code(env, vaddr); // discard result but get the host address
-    (*(uint8_t *)qsim_host_addr) = value;
+    buf = get_host_vaddr(env, vaddr, 1);
+    *buf = value;
     qsim_memop_flag = bak;
 }
