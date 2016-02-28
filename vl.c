@@ -1972,14 +1972,62 @@ static bool main_loop_should_exit(void)
     return false;
 }
 
+// -1: not yet called
+//  0: Total system run mode
+//  1: Per cpu run mode
+int run_mode = -1;
+
 uint64_t run(uint64_t insts)
 {
+    if (run_mode == -1)
+        run_mode = 0;
+    else if (run_mode == 1)
+        return 0;
+
     qsim_icount = insts;
-    
+
     swapcontext(&main_context, &qemu_context);
     checkcontext();
-    
+
     return insts - qsim_icount;
+}
+
+uint64_t run_cpu(int cpu_id, uint64_t insts)
+{
+    if (run_mode == -1)
+        run_mode = 1;
+    else if (run_mode == 0)
+        return 0;
+
+    qsim_icount = insts;
+    qsim_id = cpu_id;
+    swapcontext(&main_context, &qemu_context);
+    checkcontext();
+
+    return insts - qsim_icount;
+}
+
+/* Swap out to qsim context.
+ *
+ * Depending on run mode, we either swap out right away or schedule a qemu
+ * bottom half to swap out once all the cpus are done execution.
+ */
+void qsim_swap_ctx(void)
+{
+    QEMUBH *bh;
+    if (!run_mode) {
+        qsim_swap(NULL);
+    }
+    else {
+        bh = qemu_bh_new(qsim_swap, 0);
+        qemu_bh_schedule(bh);
+    }
+}
+
+void qsim_swap(void *opaque)
+{
+    swapcontext(&qemu_context, &main_context);
+    checkcontext();
 }
 
 static void qsim_loop_main(void)
@@ -2001,7 +2049,7 @@ static void qsim_loop_main(void)
     } while (!main_loop_should_exit());
 
     bdrv_close_all();
-	pause_all_vcpus();
+    pause_all_vcpus();
     res_free();
 #ifdef CONFIG_TPM
     tpm_cleanup();
