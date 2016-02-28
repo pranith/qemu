@@ -1911,6 +1911,8 @@ int qemu_loadvm_state(QEMUFile *f)
     return ret;
 }
 
+extern void qsim_swap(void *opaque);
+
 typedef struct {
     const char* file;
 } state_file;
@@ -1958,7 +1960,8 @@ void qsim_savevm_state_bh(void* opaque)
         return;
     }
 
-    exit(0);
+    // state saved, swap out to qsim
+    qsim_swap(0);
 
     return;
 }
