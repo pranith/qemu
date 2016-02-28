@@ -131,6 +131,10 @@ void qemu_savevm_send_postcopy_ram_discard(QEMUFile *f, const char *name,
 
 int qemu_loadvm_state(QEMUFile *f);
 
+void qsim_savevm_state(const char *filename);
+int qsim_loadvm_state(const char *filename);
+void qsim_savevm_state_bh(void *opaque);
+
 typedef enum DisplayType
 {
     DT_DEFAULT,
