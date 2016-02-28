@@ -1209,7 +1209,7 @@ static void handle_even_inj(CPUX86State *env, int intno, int is_int,
 }
 #endif
 
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 
 /*
  * Begin execution of an interruption. is_int is TRUE if coming from

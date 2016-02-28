@@ -260,7 +260,7 @@ io_cb_t     qsim_io_cb     = NULL;
 reg_cb_t    qsim_reg_cb    = NULL;
 trans_cb_t  qsim_trans_cb  = NULL;
 
-bool qsim_gen_callbacks = false;
+int qsim_gen_callbacks = 0;
 bool qsim_sys_callbacks = false;
 
 bool atomic_flag = false;
@@ -289,10 +289,8 @@ void set_reg_cb   (reg_cb_t    cb) { qsim_reg_cb    = cb; }
 void set_trans_cb (trans_cb_t  cb) { qsim_trans_cb  = cb; }
 
 void set_gen_cbs  (bool state) {
-
-  // Mark all generated TBs as stale so that new TBs are generated
-
-  qsim_gen_callbacks = state;
+    // Mark all generated TBs as stale so that new TBs are generated
+    qsim_gen_callbacks++;
 }
 
 extern void checkcontext(void);

@@ -29,7 +29,8 @@
 extern uint64_t qsim_icount;
 extern io_cb_t qsim_io_cb;
 extern magic_cb_t qsim_magic_cb;
-extern bool qsim_gen_callbacks, qsim_sys_callbacks;
+extern int qsim_gen_callbacks;
+extern bool qsim_sys_callbacks;
 
 extern qsim_ucontext_t main_context;
 extern qsim_ucontext_t qemu_context;
@@ -173,29 +174,37 @@ void helper_cpuid(CPUX86State *env)
     eax = (uint32_t)env->regs[R_EAX];
 
     if (eax == 0xaaaaaaaa) {
-        tb_flush(cs);
-        qsim_gen_callbacks = true;
         qsim_tpid = curr_tpid[cpu_id];
-        printf("Enabling callback generation ");
-        if (qsim_sys_callbacks)
-            printf("system wide.\n");
-        else
-            printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, cpu_id);
-    }
+        if (!qsim_gen_callbacks) {
+            tb_flush(cs);
+
+            printf("Enabling callback generation ");
+            if (qsim_sys_callbacks)
+                printf("system wide.\n");
+            else
+                printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, cpu_id);
+
+            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+                qsim_swap_ctx();
+        }
+        qsim_gen_callbacks++;
+    } else if (eax == 0xfa11dead) {
+        qsim_gen_callbacks--;
+        if (!qsim_gen_callbacks) {
+            qsim_tpid = -1;
+            tb_flush(cs);
+
+            printf("Disabling callback generation.\n");
+
+            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+                qsim_swap_ctx();
+        }
+    } else if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+        qsim_swap_ctx();
 
     if ((eax & 0xffff0000) == 0xc75c0000) {
         // context switch
         curr_tpid[cpu_id] = eax & 0xffff;
-    }
-
-    if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
-        qsim_swap_ctx();
-
-    if (eax == 0xfa11dead) {
-        tb_flush(cs);
-        qsim_tpid = -1;
-        qsim_gen_callbacks = false;
-        printf("Disabling callback generation.\n");
     }
 
     eax &= 0xfffffff0;

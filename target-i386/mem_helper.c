@@ -37,7 +37,7 @@ extern atomic_cb_t  qsim_atomic_cb;
 extern int_cb_t     qsim_int_cb;
 extern reg_cb_t     qsim_reg_cb;
 
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 extern bool qsim_sys_callbacks;
 
 extern int qsim_id;
