@@ -61,7 +61,7 @@ void helper_lock(void)
     atomic_locked = 0;
     // Suspend execution immediately if the atomic callback returns nonzero
     if (qsim_gen_callbacks && qsim_atomic_cb && qsim_atomic_cb(qsim_id))
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
 }
 
 void helper_unlock(void)
@@ -204,7 +204,7 @@ void helper_atomic_callback(void)
 
     /* if atomic callback returns non-zero, suspend execution */
     if (qsim_gen_callbacks && qsim_atomic_cb && qsim_atomic_cb(qsim_id))
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
 
     return;
 }
@@ -485,7 +485,7 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
 
     qsim_icount--;
     while (qsim_icount == 0) {
-        swapcontext(&qemu_context, &main_context);
+        qsim_swap_ctx();
     }
 
     // pid based callbacks
