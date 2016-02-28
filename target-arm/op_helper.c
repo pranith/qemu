@@ -46,7 +46,7 @@ extern int_cb_t     qsim_int_cb;
 extern magic_cb_t   qsim_magic_cb;
 extern reg_cb_t     qsim_reg_cb;
 
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 extern bool qsim_sys_callbacks;
 
 void checkcontext(void);

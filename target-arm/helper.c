@@ -735,7 +735,7 @@ void pmccntr_sync(CPUARMState *env)
     }
 }
 
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 extern bool qsim_sys_callbacks;
 extern magic_cb_t qsim_magic_cb;
 extern uint64_t qsim_tpid;
@@ -752,22 +752,38 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 
     qsim_id = cs->cpu_index;
     if (value == 0xaaaaaaaa) { // start
+        printf("Enable called: %d\n", qsim_gen_callbacks);
         qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
-        tb_flush(cs);
-        qsim_gen_callbacks = true;
 
-        printf("Enabling callback generation ");
-		if (qsim_sys_callbacks)
-                    printf("systemwide.\n");
-		else
-                    printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, qsim_id);
+        if (!qsim_gen_callbacks) {
+            tb_flush(cs);
+            printf("Enabling callback generation ");
+            if (qsim_sys_callbacks)
+                printf("systemwide.\n");
+            else
+                printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, qsim_id);
+
+            // Call magic cb the first time
+            if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+                qsim_swap_ctx();
+            }
+        }
+        qsim_gen_callbacks++;
     } else if (value == 0xfa11dead) {
-      tb_flush(cs);
-      qsim_gen_callbacks = false;
-      printf("Disabling callback generation\n");
-    }
+      qsim_gen_callbacks--;
+      printf("Disable called: %d\n", qsim_gen_callbacks);
 
-    if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+      if (!qsim_gen_callbacks) {
+          qsim_tpid = -1;
+          tb_flush(cs);
+          printf("Disabling callback generation\n");
+
+          // Call magic cb the last time
+          if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+              qsim_swap_ctx();
+          }
+      }
+    } else if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
         qsim_swap_ctx();
     }
 
