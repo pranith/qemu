@@ -918,7 +918,7 @@ static inline void store_reg_from_load(DisasContext *s, int reg, TCGv_i32 var)
 #define STRING(x) STR_HELPER(x)
 #define STR_HELPER(x) #x
 
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 
 /* Abstractions of "generate code to do a guest load/store for
  * AArch32", where a vaddr is always 32 bits (and is zero
