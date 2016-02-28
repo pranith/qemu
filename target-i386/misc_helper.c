@@ -35,6 +35,7 @@ extern qsim_ucontext_t qemu_context;
 
 void checkcontext(void);
 int get_cpuid(CPUX86State *env);
+CPUX86State* get_env(int cpu_idx);
 
 void checkcontext(void)
 {
@@ -48,6 +49,18 @@ int get_cpuid(CPUX86State *env)
     X86CPU *cpu = x86_env_get_cpu(env);
     CPUState *cs = CPU(cpu);
     return cs->cpu_index;
+}
+
+CPUX86State* get_env(int cpu_idx)
+{
+    CPUX86State *cpu =  (CPUX86State *)first_cpu;
+    CPUState *cs = CPU(cpu);
+    for (; cs && cs->cpu_index != cpu_idx; cs = CPU_NEXT(cs));
+
+    if (cs)
+      cpu = &X86_CPU(cs)->env;
+
+    return cpu;
 }
 
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
