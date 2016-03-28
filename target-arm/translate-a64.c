@@ -86,6 +86,12 @@ typedef void NeonGenOneOpFn(TCGv_i64, TCGv_i64);
 typedef void CryptoTwoOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32);
 typedef void CryptoThreeOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32, TCGv_i32);
 
+#define QSIM_REG_READ(reg, size)                                             \
+   (gen_helper_reg_read_callback(cpu_env, tcg_const_i32(reg), tcg_const_i32(size))) 
+
+#define QSIM_REG_WRITE(reg, size)                                            \
+   (gen_helper_reg_write_callback(cpu_env, tcg_const_i32(reg), tcg_const_i32(size)))
+
 static void qsim_set_inst_type(enum inst_type type)
 {
     if (qsim_gen_callbacks)
@@ -384,6 +390,7 @@ static TCGv_i64 new_tmp_a64_zero(DisasContext *s)
  */
 static TCGv_i64 cpu_reg(DisasContext *s, int reg)
 {
+    QSIM_REG_READ(reg, 4); 
     if (reg == 31) {
         return new_tmp_a64_zero(s);
     } else {
@@ -394,6 +401,7 @@ static TCGv_i64 cpu_reg(DisasContext *s, int reg)
 /* register access for when 31 == SP */
 static TCGv_i64 cpu_reg_sp(DisasContext *s, int reg)
 {
+    QSIM_REG_READ(reg, 4); 
     return cpu_X[reg];
 }
 
