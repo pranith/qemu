@@ -179,6 +179,14 @@
     atomic_cmpxchg__nocheck(ptr, old, new);                             \
 })
 
+#define atomic_bool_cmpxchg(ptr, old, new)                              \
+    ({                                                                  \
+    typeof(*ptr) _old = (old), _new = (new);                            \
+    __atomic_compare_exchange(ptr, &_old, &_new, false,                 \
+                                  __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);  \
+    })
+
+
 /* Provide shorter names for GCC atomic builtins, return old value */
 #define atomic_fetch_inc(ptr)  __atomic_fetch_add(ptr, 1, __ATOMIC_SEQ_CST)
 #define atomic_fetch_dec(ptr)  __atomic_fetch_sub(ptr, 1, __ATOMIC_SEQ_CST)
@@ -378,6 +386,7 @@
 
 #define atomic_cmpxchg(ptr, old, new) __sync_val_compare_and_swap(ptr, old, new)
 #define atomic_cmpxchg__nocheck(ptr, old, new)  atomic_cmpxchg(ptr, old, new)
+#define atomic_bool_cmpxchg(ptr, old, new)    __sync_bool_compare_and_swap(ptr, old, new)
 
 /* And even shorter names that return void.  */
 #define atomic_inc(ptr)        ((void) __sync_fetch_and_add(ptr, 1))
