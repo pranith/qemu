@@ -626,10 +626,6 @@ int cpu_exec(CPUState *cpu)
 
     rcu_read_lock();
 
-    if (unlikely(atomic_mb_read(&exit_request))) {
-        cpu->exit_request = 1;
-    }
-
     cc->cpu_exec_enter(cpu);
 
     /* Calculate difference between guest clock and host clock.
