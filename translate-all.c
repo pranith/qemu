@@ -1404,12 +1404,11 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
  * access: the virtual CPU will exit the current TB if code is modified inside
  * this TB.
  *
- * Called with mmap_lock held for user-mode emulation
+ * Called with mmap_lock held for user-mode emulation, grabs tb_lock
+ * Called with tb_lock held for system-mode emulation
  */
-void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t end)
+static void tb_invalidate_phys_range_1(tb_page_addr_t start, tb_page_addr_t end)
 {
-    assert_memory_lock();
-
     while (start < end) {
         tb_invalidate_phys_page_range(start, end, 0);
         start &= TARGET_PAGE_MASK;
@@ -1417,6 +1416,21 @@ void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t end)
     }
 }
 
+#ifdef CONFIG_SOFTMMU
+void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t end)
+{
+    assert_tb_lock();
+    tb_invalidate_phys_range_1(start, end);
+}
+#else
+void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t end)
+{
+    assert_memory_lock();
+    tb_lock();
+    tb_invalidate_phys_range_1(start, end);
+    tb_unlock();
+}
+#endif
 /*
  * Invalidate all TBs which intersect with the target physical address range
  * [start;end[. NOTE: start and end must refer to the *same* physical page.
@@ -1424,7 +1438,8 @@ void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t end)
  * access: the virtual CPU will exit the current TB if code is modified inside
  * this TB.
  *
- * Called with mmap_lock held for user-mode emulation
+ * Called with tb_lock/mmap_lock held for user-mode emulation
+ * Called with tb_lock held for system-mode emulation
  */
 void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
                                    int is_cpu_write_access)
@@ -1447,6 +1462,7 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
 #endif /* TARGET_HAS_PRECISE_SMC */
 
     assert_memory_lock();
+    assert_tb_lock();
 
     p = page_find(start >> TARGET_PAGE_BITS);
     if (!p) {
@@ -1461,7 +1477,6 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
     /* we remove all the TBs in the range [start, end[ */
     /* XXX: see if in some cases it could be faster to invalidate all
        the code */
-    tb_lock();
     tb = p->first_tb;
     while (tb != NULL) {
         n = (uintptr_t)tb & 3;
@@ -1521,12 +1536,12 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
         cpu_loop_exit_noexc(cpu);
     }
 #endif
-    tb_unlock();
 }
 
 #ifdef CONFIG_SOFTMMU
 /* len must be <= 8 and start must be a multiple of len.
- * Called via softmmu_template.h, with iothread mutex not held.
+ * Called via softmmu_template.h when code areas are written to with
+ * tb_lock held.
  */
 void tb_invalidate_phys_page_fast(tb_page_addr_t start, int len)
 {
@@ -1541,6 +1556,8 @@ void tb_invalidate_phys_page_fast(tb_page_addr_t start, int len)
                   (intptr_t)cpu_single_env->segs[R_CS].base);
     }
 #endif
+    assert_memory_lock();
+
     p = page_find(start >> TARGET_PAGE_BITS);
     if (!p) {
         return;
@@ -1587,6 +1604,8 @@ static bool tb_invalidate_phys_page(tb_page_addr_t addr, uintptr_t pc)
     target_ulong current_cs_base = 0;
     uint32_t current_flags = 0;
 #endif
+
+    assert_memory_lock();
 
     addr &= TARGET_PAGE_MASK;
     p = page_find(addr >> TARGET_PAGE_BITS);
@@ -1691,7 +1710,9 @@ void tb_invalidate_phys_addr(AddressSpace *as, hwaddr addr)
         return;
     }
     ram_addr = memory_region_get_ram_addr(mr) + addr;
+    tb_lock();
     tb_invalidate_phys_page_range(ram_addr, ram_addr + 1, 0);
+    tb_unlock();
     rcu_read_unlock();
 }
 #endif /* !defined(CONFIG_USER_ONLY) */
