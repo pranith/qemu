@@ -94,14 +94,10 @@ matrix:
       addons:
       dist: trusty
       compiler: gcc
-      sources:
-        - ubuntu-toolchain-r-test
-      packages:
-        - gcc-aarch64-linux-gnu
-        - libc6-dev-arm64-cross
       before_install:
         - sudo apt-get update -qq
         - sudo apt-get build-dep -qq qemu
+	- sudo apt-get install gcc-aarch64-linux-gnu
         - wget -O - http://people.linaro.org/~alex.bennee/qemu-submodule-git-seed.tar.xz | tar -xvJ
         - git submodule update --init --recursive
       after_success:

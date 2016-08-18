@@ -1,6 +1,6 @@
 date
 LITMUSOPTS="${@:-$LITMUSOPTS}"
-QEMU=../../../../build/x86_64-linux-user/qemu-x86_64
+QEMU=../../../../x86_64-linux-user/qemu-x86_64
 SLEEP=0
 if [ ! -f SAL.no ]; then
 cat <<'EOF'
