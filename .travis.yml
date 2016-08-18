@@ -106,6 +106,6 @@ matrix:
         - git submodule update --init --recursive
       after_success:
         - cd tests/tcg/mttcg/x86
-	- make tests
-	- cd ../aarch64
-	- make tests
+        - make tests
+        - cd ../aarch64
+        - make tests
