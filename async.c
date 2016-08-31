@@ -44,6 +44,15 @@ struct QEMUBH {
     bool deleted;
 };
 
+void aio_enqueue_bh(AioContext *ctx, QEMUBH *bh);
+
+void aio_enqueue_bh(AioContext *ctx, QEMUBH *bh)
+{
+    do {
+        bh->next = ctx->first_bh;
+    } while (atomic_cmpxchg(&ctx->first_bh, bh->next, bh) != bh->next);
+}
+
 QEMUBH *aio_bh_new(AioContext *ctx, QEMUBHFunc *cb, void *opaque)
 {
     QEMUBH *bh;
@@ -52,13 +61,11 @@ QEMUBH *aio_bh_new(AioContext *ctx, QEMUBHFunc *cb, void *opaque)
         .ctx = ctx,
         .cb = cb,
         .opaque = opaque,
+        .next = NULL,
     };
-    qemu_mutex_lock(&ctx->bh_lock);
-    bh->next = ctx->first_bh;
-    /* Make sure that the members are ready before putting bh into list */
-    smp_wmb();
-    ctx->first_bh = bh;
-    qemu_mutex_unlock(&ctx->bh_lock);
+
+    aio_enqueue_bh(ctx, bh);
+
     return bh;
 }
 
@@ -100,18 +107,16 @@ int aio_bh_poll(AioContext *ctx)
 
     /* remove deleted bhs */
     if (!ctx->walking_bh) {
-        qemu_mutex_lock(&ctx->bh_lock);
         bhp = &ctx->first_bh;
-        while (*bhp) {
-            bh = *bhp;
+        while (bhp && *bhp) {
+            bh = atomic_xchg(bhp, (*bhp)->next);
             if (bh->deleted) {
-                *bhp = bh->next;
                 g_free(bh);
             } else {
-                bhp = &bh->next;
+                bhp = (*bhp) ? &(*bhp)->next : NULL;
+                aio_enqueue_bh(ctx, bh);
             }
         }
-        qemu_mutex_unlock(&ctx->bh_lock);
     }
 
     return ret;
@@ -251,22 +256,18 @@ aio_ctx_finalize(GSource     *source)
     }
 #endif
 
-    qemu_mutex_lock(&ctx->bh_lock);
     while (ctx->first_bh) {
-        QEMUBH *next = ctx->first_bh->next;
+        QEMUBH *old_bh = atomic_xchg(&ctx->first_bh, ctx->first_bh->next);
 
         /* qemu_bh_delete() must have been called on BHs in this AioContext */
-        assert(ctx->first_bh->deleted);
+        assert(old_bh->deleted);
 
-        g_free(ctx->first_bh);
-        ctx->first_bh = next;
+        g_free(old_bh);
     }
-    qemu_mutex_unlock(&ctx->bh_lock);
 
     aio_set_event_notifier(ctx, &ctx->notifier, false, NULL);
     event_notifier_cleanup(&ctx->notifier);
     rfifolock_destroy(&ctx->lock);
-    qemu_mutex_destroy(&ctx->bh_lock);
     timerlistgroup_deinit(&ctx->tlg);
 }
 
@@ -365,7 +366,6 @@ AioContext *aio_context_new(Error **errp)
     ctx->linux_aio = NULL;
 #endif
     ctx->thread_pool = NULL;
-    qemu_mutex_init(&ctx->bh_lock);
     rfifolock_init(&ctx->lock, aio_rfifolock_cb, ctx);
     timerlistgroup_init(&ctx->tlg, aio_timerlist_notify, ctx);
 
