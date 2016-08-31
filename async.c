@@ -77,15 +77,13 @@ void aio_bh_call(QEMUBH *bh)
 /* Multiple occurrences of aio_bh_poll cannot be called concurrently */
 int aio_bh_poll(AioContext *ctx)
 {
-    QEMUBH *bh, **bhp, *next;
+    QEMUBH *bh, *next, **bhp;
     int ret;
 
     ctx->walking_bh++;
 
     ret = 0;
     for (bh = ctx->first_bh; bh; bh = next) {
-        /* Make sure that fetching bh happens before accessing its members */
-        smp_read_barrier_depends();
         next = bh->next;
         /* The atomic_xchg is paired with the one in qemu_bh_schedule.  The
          * implicit memory barrier ensures that the callback sees all writes
@@ -351,6 +349,7 @@ AioContext *aio_context_new(Error **errp)
 
     ctx = (AioContext *) g_source_new(&aio_source_funcs, sizeof(AioContext));
     aio_context_setup(ctx);
+    ctx->first_bh = NULL;
 
     ret = event_notifier_init(&ctx->notifier, false);
     if (ret < 0) {
