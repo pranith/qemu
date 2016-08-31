@@ -80,8 +80,6 @@ int aio_bh_poll(AioContext *ctx)
     QEMUBH *bh, *next, **bhp;
     int ret;
 
-    ctx->walking_bh++;
-
     ret = 0;
     for (bh = ctx->first_bh; bh; bh = next) {
         next = bh->next;
@@ -101,19 +99,15 @@ int aio_bh_poll(AioContext *ctx)
         }
     }
 
-    ctx->walking_bh--;
-
     /* remove deleted bhs */
-    if (!ctx->walking_bh) {
-        bhp = &ctx->first_bh;
-        while (bhp && *bhp) {
-            bh = atomic_xchg(bhp, (*bhp)->next);
-            if (bh->deleted) {
-                g_free(bh);
-            } else {
-                bhp = (*bhp) ? &(*bhp)->next : NULL;
-                aio_enqueue_bh(ctx, bh);
-            }
+    bhp = &ctx->first_bh;
+    while (bhp && *bhp) {
+        bh = atomic_xchg(bhp, (*bhp)->next);
+        if (bh->deleted) {
+            g_free(bh);
+        } else {
+            bhp = (*bhp) ? &(*bhp)->next : NULL;
+            aio_enqueue_bh(ctx, bh);
         }
     }
 
