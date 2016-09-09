@@ -139,7 +139,11 @@ static void arm_timer_write(void *opaque, hwaddr offset,
     arm_timer_update(s);
 }
 
-static void arm_timer_tick(void *opaque)
+static void dummy_arm_timer_tick(void *opaque)
+{
+}
+
+__attribute__((unused)) static void arm_timer_tick(void *opaque)
 {
     arm_timer_state *s = (arm_timer_state *)opaque;
     s->int_level = 1;
@@ -159,16 +163,17 @@ static const VMStateDescription vmstate_arm_timer = {
     }
 };
 
+arm_timer_state *s;
+
 static arm_timer_state *arm_timer_init(uint32_t freq)
 {
-    arm_timer_state *s;
     QEMUBH *bh;
 
     s = (arm_timer_state *)g_malloc0(sizeof(arm_timer_state));
     s->freq = freq;
     s->control = TIMER_CTRL_IE;
 
-    bh = qemu_bh_new(arm_timer_tick, s);
+    bh = qemu_bh_new(dummy_arm_timer_tick, s);
     s->timer = ptimer_init(bh);
     vmstate_register(NULL, -1, &vmstate_arm_timer, s);
     return s;

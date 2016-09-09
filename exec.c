@@ -167,8 +167,14 @@ uint8_t         qsim_irq_vec     = 0;
 int             qsim_irq_pending = 0;
 static pthread_mutex_t qsim_irq_lock    = PTHREAD_MUTEX_INITIALIZER;
 
+//extern arm_timer_state *s;
+//extern arm_timer_tick(void *s);
 
 int interrupt(uint8_t vec) {
+
+  //arm_timer_tick(s);
+  for (CPUState *cs = CPU(first_cpu); cs; cs = CPU_NEXT(cs))
+    cpu_interrupt(cs, CPU_INTERRUPT_HARD);
 
     return 0;
   int rvec = 0;
