@@ -1,9 +1,9 @@
 # -*- Mode: makefile -*-
 #
-# Arm linux-user TCG tests
+# mips linux-user TCG tests
 #
 # The Make is expected to be called in the
-# ${BUILD_DIR}/arm-linux-user/tests directory
+# ${BUILD_DIR}/mips-linux-user/tests directory
 #
 
 BUILD_DIR=../..
@@ -11,18 +11,17 @@ include $(BUILD_DIR)/config-host.mak	# brings in SRC_PATH
 include ../config-target.mak		# TARGET_NAME
 include $(SRC_PATH)/rules.mak
 
-$(call set-vpath, $(SRC_PATH)/tests/tcg/arm)
+$(call set-vpath, $(SRC_PATH)/tests/tcg/mips)
 
-QEMU=$(BUILD_DIR)/arm-linux-user/qemu-arm
+QEMU=$(BUILD_DIR)/mips-linux-user/qemu-mips
 
 # Compiler set-up, default to system compiler if not set
 CROSS_CC?=$(CC)
 
-QEMU_INCLUDES += -I$(BUILD_DIR)
 CFLAGS=-Wall -O2 -g -fno-strict-aliasing
 LDFLAGS=
 
-TESTS=hello-arm arm-iwmmxt
+TESTS=hello-mips
 
 all: $(patsubst %,run-%,$(TESTS))
 test: all
@@ -34,18 +33,14 @@ run-%: %
 
 #.PHONY: $(patsubst %,run-%,$(TESTS))
 
-run-hello-arm: hello-arm
-run-arm-iwmmxt: arm-iwmmxt
+run-hello-mips: hello-mips
 
-# arm test
-hello-arm: hello-arm.o
+# mips test
+hello-mips: hello-mips.o
 	$(CROSS_CC) -o $@ $<
 
-hello-arm.o: hello-arm.c
+hello-mips.o: hello-mips.c
 	$(CROSS_CC) -Wall -g -O2 -c -o $@ $<
-
-arm-iwmmxt: test-arm-iwmmxt.s
-	cpp < $< | $(CROSS_CC) -Wall -static -march=iwmmxt -mabi=aapcs -x assembler - -o $@
 
 clean:
 	rm -f *~ *.o $(TESTS)
