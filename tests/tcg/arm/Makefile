@@ -19,8 +19,8 @@ QEMU=$(BUILD_DIR)/arm-linux-user/qemu-arm
 CROSS_CC?=$(CC)
 
 QEMU_INCLUDES += -I$(BUILD_DIR)
-CFLAGS=-Wall -O2 -g -fno-strict-aliasing
-LDFLAGS=
+CFLAGS=-Wall -O2 -g -fno-strict-aliasing -nostdlib
+LDFLAGS=-nostdlib
 
 TESTS=hello-arm arm-iwmmxt
 
@@ -39,10 +39,10 @@ run-arm-iwmmxt: arm-iwmmxt
 
 # arm test
 hello-arm: hello-arm.o
-	$(CROSS_CC) -o $@ $<
+	$(CROSS_CC) $(LDFLAGS) -o $@ $<
 
 hello-arm.o: hello-arm.c
-	$(CROSS_CC) -Wall -g -O2 -c -o $@ $<
+	$(CROSS_CC) $(CFLAGS) -c -o $@ $<
 
 arm-iwmmxt: test-arm-iwmmxt.s
 	cpp < $< | $(CROSS_CC) -Wall -static -march=iwmmxt -mabi=aapcs -x assembler - -o $@
