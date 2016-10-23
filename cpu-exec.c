@@ -140,7 +140,7 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
     uintptr_t ret;
     TranslationBlock *last_tb;
     int tb_exit;
-    uint8_t *tb_ptr = itb->tc_ptr;
+    uint8_t *tb_ptr = atomic_read(&itb->tc_ptr);
 
     qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                            "Trace %p [" TARGET_FMT_lx "] %s\n",
@@ -185,7 +185,7 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
             cc->synchronize_from_tb(cpu, last_tb);
         } else {
             assert(cc->set_pc);
-            cc->set_pc(cpu, last_tb->pc);
+            cc->set_pc(cpu, atomic_read(&last_tb->pc));
         }
     }
     if (tb_exit == TB_EXIT_REQUESTED) {
@@ -222,6 +222,36 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
 }
 #endif
 
+static void cpu_exec_step(CPUState *cpu)
+{
+    CPUArchState *env = (CPUArchState *)cpu->env_ptr;
+    TranslationBlock *tb;
+    target_ulong cs_base, pc;
+    uint32_t flags;
+
+    cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
+    tb = tb_gen_code(cpu, pc, cs_base, flags,
+                     1 | CF_NOCACHE | CF_IGNORE_ICOUNT);
+    tb->orig_tb = NULL;
+    /* execute the generated code */
+    trace_exec_tb_nocache(tb, pc);
+    cpu_tb_exec(cpu, tb);
+    tb_phys_invalidate(tb, -1);
+    tb_free(tb);
+}
+
+void cpu_exec_step_atomic(CPUState *cpu)
+{
+    start_exclusive();
+
+    /* Since we got here, we know that parallel_cpus must be true.  */
+    parallel_cpus = false;
+    cpu_exec_step(cpu);
+    parallel_cpus = true;
+
+    end_exclusive();
+}
+
 struct tb_desc {
     target_ulong pc;
     target_ulong cs_base;
@@ -235,13 +265,13 @@ static bool tb_cmp(const void *p, const void *d)
     const TranslationBlock *tb = p;
     const struct tb_desc *desc = d;
 
-    if (tb->pc == desc->pc &&
-        tb->page_addr[0] == desc->phys_page1 &&
-        tb->cs_base == desc->cs_base &&
-        tb->flags == desc->flags &&
+    if (atomic_read(&tb->pc) == desc->pc &&
+        atomic_read(&tb->page_addr[0]) == desc->phys_page1 &&
+        atomic_read(&tb->cs_base) == desc->cs_base &&
+        atomic_read(&tb->flags) == desc->flags &&
         !atomic_read(&tb->invalid)) {
         /* check next page if needed */
-        if (tb->page_addr[1] == -1) {
+        if (atomic_read(&tb->page_addr[1]) == -1) {
             return true;
         } else {
             tb_page_addr_t phys_page2;
@@ -249,7 +279,7 @@ static bool tb_cmp(const void *p, const void *d)
 
             virt_page2 = (desc->pc & TARGET_PAGE_MASK) + TARGET_PAGE_SIZE;
             phys_page2 = get_page_addr_code(desc->env, virt_page2);
-            if (tb->page_addr[1] == phys_page2) {
+            if (atomic_read(&tb->page_addr[1]) == phys_page2) {
                 return true;
             }
         }
@@ -291,8 +321,9 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
        is executed. */
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
     tb = atomic_rcu_read(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)]);
-    if (unlikely(!tb || tb->pc != pc || tb->cs_base != cs_base ||
-                 tb->flags != flags)) {
+    if (unlikely(!tb || atomic_read(&tb->pc) != pc ||
+                 atomic_read(&tb->cs_base) != cs_base ||
+                 atomic_read(&tb->flags) != flags)) {
         tb = tb_htable_lookup(cpu, pc, cs_base, flags);
         if (!tb) {
 
@@ -507,7 +538,7 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
         return;
     }
 
-    trace_exec_tb(tb, tb->pc);
+    trace_exec_tb(tb, atomic_read(&tb->pc));
     ret = cpu_tb_exec(cpu, tb);
     *last_tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);
     *tb_exit = ret & TB_EXIT_MASK;

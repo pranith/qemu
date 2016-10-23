@@ -119,6 +119,7 @@ static void *l1_map[V_L1_SIZE];
 
 /* code generation context */
 TCGContext tcg_ctx;
+bool parallel_cpus;
 
 /* translation block context */
 #ifdef CONFIG_USER_ONLY
@@ -773,9 +774,10 @@ static TranslationBlock *tb_alloc(target_ulong pc)
         return NULL;
     }
     tb = &tcg_ctx.tb_ctx.tbs[tcg_ctx.tb_ctx.nb_tbs++];
-    tb->pc = pc;
-    tb->cflags = 0;
-    tb->invalid = false;
+
+    atomic_set(&tb->pc, pc);
+    atomic_set(&tb->cflags, 0);
+    atomic_set(&tb->invalid, false);
     return tb;
 }
 
@@ -804,22 +806,21 @@ static inline void invalidate_page_bitmap(PageDesc *p)
 static void page_flush_tb_1(int level, void **lp)
 {
     int i;
+    PageDesc *pd = atomic_rcu_read(lp);
 
-    if (*lp == NULL) {
-        return;
-    }
-    if (level == 0) {
-        PageDesc *pd = *lp;
+    if (pd) {
+        if (level == 0) {
 
-        for (i = 0; i < V_L2_SIZE; ++i) {
-            pd[i].first_tb = NULL;
-            invalidate_page_bitmap(pd + i);
-        }
-    } else {
-        void **pp = *lp;
+            for (i = 0; i < V_L2_SIZE; ++i) {
+                atomic_set(&pd[i].first_tb, NULL);
+                invalidate_page_bitmap(pd + i);
+            }
+        } else {
+            void **pp = (void **) pd;
 
-        for (i = 0; i < V_L2_SIZE; ++i) {
-            page_flush_tb_1(level - 1, pp + i);
+            for (i = 0; i < V_L2_SIZE; ++i) {
+                page_flush_tb_1(level - 1, pp + i);
+            }
         }
     }
 }
@@ -1095,7 +1096,7 @@ static inline void tb_alloc_page(TranslationBlock *tb,
     bool page_already_protected;
 #endif
 
-    tb->page_addr[n] = page_addr;
+    atomic_set(&tb->page_addr[n], page_addr);
     p = page_find_alloc(page_addr >> TARGET_PAGE_BITS, 1);
     tb->page_next[n] = p->first_tb;
 #ifndef CONFIG_USER_ONLY
@@ -1156,7 +1157,7 @@ static void tb_link_page(TranslationBlock *tb, tb_page_addr_t phys_pc,
     if (phys_page2 != -1) {
         tb_alloc_page(tb, 1, phys_page2);
     } else {
-        tb->page_addr[1] = -1;
+        atomic_set(&tb->page_addr[1], -1);
     }
 
     /* add in the hash table */
@@ -1198,10 +1199,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 
     gen_code_buf = tcg_ctx.code_gen_ptr;
-    tb->tc_ptr = gen_code_buf;
-    tb->cs_base = cs_base;
-    tb->flags = flags;
-    tb->cflags = cflags;
+    atomic_set(&tb->tc_ptr, gen_code_buf);
+    atomic_set(&tb->cs_base, cs_base);
+    atomic_set(&tb->flags, flags);
+    atomic_set(&tb->cflags, cflags);
 
 #ifdef CONFIG_PROFILER
     tcg_ctx.tb_count1++; /* includes aborted translations because of
@@ -1359,7 +1360,7 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
     /* we remove all the TBs in the range [start, end[ */
     /* XXX: see if in some cases it could be faster to invalidate all
        the code */
-    tb = p->first_tb;
+    tb = atomic_read(&p->first_tb);
     while (tb != NULL) {
         n = (uintptr_t)tb & 3;
         tb = (TranslationBlock *)((uintptr_t)tb & ~3);
@@ -1967,16 +1968,15 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
            the code inside.  */
         if (!(p->flags & PAGE_WRITE) &&
             (flags & PAGE_WRITE) &&
-            p->first_tb) {
+            atomic_read(&p->first_tb)) {
             tb_invalidate_phys_page(addr, 0);
         }
-        p->flags = flags;
+        atomic_set(&p->flags, flags);
     }
 }
 
 int page_check_range(target_ulong start, target_ulong len, int flags)
 {
-    PageDesc *p;
     target_ulong end;
     target_ulong addr;
 
@@ -2002,28 +2002,31 @@ int page_check_range(target_ulong start, target_ulong len, int flags)
     for (addr = start, len = end - start;
          len != 0;
          len -= TARGET_PAGE_SIZE, addr += TARGET_PAGE_SIZE) {
-        p = page_find(addr >> TARGET_PAGE_BITS);
-        if (!p) {
-            return -1;
-        }
-        if (!(p->flags & PAGE_VALID)) {
-            return -1;
-        }
+        PageDesc *p = page_find(addr >> TARGET_PAGE_BITS);
+        if (p) {
+            int cur_flags = atomic_read(&p->flags);
 
-        if ((flags & PAGE_READ) && !(p->flags & PAGE_READ)) {
-            return -1;
-        }
-        if (flags & PAGE_WRITE) {
-            if (!(p->flags & PAGE_WRITE_ORG)) {
+            if (!(cur_flags & PAGE_VALID)) {
                 return -1;
             }
-            /* unprotect the page if it was put read-only because it
-               contains translated code */
-            if (!(p->flags & PAGE_WRITE)) {
-                if (!page_unprotect(addr, 0)) {
+
+            if ((flags & PAGE_READ) && !(cur_flags & PAGE_READ)) {
+                return -1;
+            }
+            if (flags & PAGE_WRITE) {
+                if (!(cur_flags & PAGE_WRITE_ORG)) {
                     return -1;
                 }
+                /* unprotect the page if it was put read-only because it
+                   contains translated code */
+                if (!(cur_flags & PAGE_WRITE)) {
+                    if (!page_unprotect(addr, 0)) {
+                        return -1;
+                    }
+                }
             }
+        } else {
+            return -1;
         }
     }
     return 0;

@@ -30,7 +30,7 @@
    addresses in userspace mode.  Define tb_page_addr_t to be an appropriate
    type.  */
 #if defined(CONFIG_USER_ONLY)
-typedef abi_ulong tb_page_addr_t;
+typedef target_ulong tb_page_addr_t;
 #else
 typedef ram_addr_t tb_page_addr_t;
 #endif
@@ -60,6 +60,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 void cpu_exec_init(CPUState *cpu, Error **errp);
 void QEMU_NORETURN cpu_loop_exit(CPUState *cpu);
 void QEMU_NORETURN cpu_loop_exit_restore(CPUState *cpu, uintptr_t pc);
+void QEMU_NORETURN cpu_loop_exit_atomic(CPUState *cpu, uintptr_t pc);
 
 #if !defined(CONFIG_USER_ONLY)
 void cpu_reloading_memory_map(void);
@@ -200,6 +201,17 @@ static inline void tlb_flush_by_mmuidx(CPUState *cpu, ...)
 #define USE_DIRECT_JUMP
 #endif
 
+/*
+ * TranslationBlock
+ *
+ * This structure represents a single translated block of code. The
+ * actual code is referenced via tc_ptr. This structure is accessed
+ * across multiple QEMU threads so for C11 compliance all fields
+ * should be access with at least relaxed atomic primitives. Fields
+ * that are updated after initial generation, mainly those involved
+ * with patching jumps and chaining TBs, need stronger guarantees to
+ * prevent corruption.
+ */
 struct TranslationBlock {
     target_ulong pc;   /* simulated PC corresponding to this block (EIP + CS base) */
     target_ulong cs_base; /* CS base for this block */
