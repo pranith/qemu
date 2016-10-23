@@ -198,7 +198,10 @@ static inline void qht_head_init(struct qht_bucket *b)
 static inline
 struct qht_bucket *qht_map_to_bucket(struct qht_map *map, uint32_t hash)
 {
-    return &map->buckets[hash & (map->n_buckets - 1)];
+    struct qht_bucket *b = &map->buckets[hash & (map->n_buckets - 1)];
+    prefetch(&b->sequence);
+
+    return b;
 }
 
 /* acquire all bucket locks from a map */
