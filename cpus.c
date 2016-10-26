@@ -630,9 +630,9 @@ static void cpu_throttle_timer_tick(void *opaque)
         return;
     }
     CPU_FOREACH(cpu) {
+        run_on_cpu_data data = { .host_ptr = (uintptr_t) NULL };
         if (!atomic_xchg(&cpu->throttle_thread_scheduled, 1)) {
-            async_run_on_cpu(cpu, cpu_throttle_thread,
-                             RUN_ON_CPU_NULL);
+            async_run_on_cpu(cpu, cpu_throttle_thread, data);
         }
     }
 

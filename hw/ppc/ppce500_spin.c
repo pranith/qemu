@@ -88,7 +88,7 @@ static void spin_kick(CPUState *cs, run_on_cpu_data data)
 {
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     CPUPPCState *env = &cpu->env;
-    SpinInfo *curspin = data.host_ptr;
+    SpinInfo *curspin = (SpinInfo *) data.host_ptr;
     hwaddr map_size = 64 * 1024 * 1024;
     hwaddr map_start;
 

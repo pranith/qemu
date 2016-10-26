@@ -236,17 +236,20 @@ struct kvm_run;
  * hosts in a single parameter
  */
 typedef union {
-    int           host_int;
-    unsigned long host_ulong;
-    void         *host_ptr;
-    vaddr         target_ptr;
+    int       host_int;
+    unsigned  host_unsigned;
+    uintptr_t host_ptr;
+    void      *void_ptr;  /* for (run_on_cpu_data) NULL casts */
+    vaddr     target_ptr;
 } run_on_cpu_data;
 
-#define RUN_ON_CPU_HOST_PTR(p)    ((run_on_cpu_data){.host_ptr = (p)})
-#define RUN_ON_CPU_HOST_INT(i)    ((run_on_cpu_data){.host_int = (i)})
-#define RUN_ON_CPU_HOST_ULONG(ul) ((run_on_cpu_data){.host_ulong = (ul)})
-#define RUN_ON_CPU_TARGET_PTR(v)  ((run_on_cpu_data){.target_ptr = (v)})
-#define RUN_ON_CPU_NULL           RUN_ON_CPU_HOST_PTR(NULL)
+static inline run_on_cpu_data roc_host_ptr(void * p) {
+    run_on_cpu_data d = { .host_ptr = (uintptr_t) p};
+    return d;
+}
+
+/* #define RUN_ON_CPU_HOST_PTR(p) ((run_on_cpu_data) (uintptr_t) p) */
+#define RUN_ON_CPU_HOST_PTR(p) roc_host_ptr(p)
 
 typedef void (*run_on_cpu_func)(CPUState *cpu, run_on_cpu_data data);
 

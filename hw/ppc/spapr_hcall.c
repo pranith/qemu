@@ -21,7 +21,7 @@ struct SPRSyncState {
 
 static void do_spr_sync(CPUState *cs, run_on_cpu_data arg)
 {
-    struct SPRSyncState *s = arg.host_ptr;
+    struct SPRSyncState *s = (struct SPRSyncState *) arg.host_ptr;
     PowerPCCPU *cpu = POWERPC_CPU(cs);
     CPUPPCState *env = &cpu->env;
 
@@ -889,7 +889,7 @@ typedef struct {
 static void do_set_compat(CPUState *cs, run_on_cpu_data arg)
 {
     PowerPCCPU *cpu = POWERPC_CPU(cs);
-    SetCompatState *s = arg.host_ptr;
+    SetCompatState *s = (SetCompatState *) arg.host_ptr;
 
     cpu_synchronize_state(cs);
     ppc_set_compat(cpu, s->cpu_version, &s->err);

@@ -194,7 +194,7 @@ void kvm_synchronize_all_tsc(void)
 
     if (kvm_enabled()) {
         CPU_FOREACH(cpu) {
-            run_on_cpu(cpu, do_kvm_synchronize_tsc, RUN_ON_CPU_NULL);
+            run_on_cpu(cpu, do_kvm_synchronize_tsc, (run_on_cpu_data) NULL);
         }
     }
 }

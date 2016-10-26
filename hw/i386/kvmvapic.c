@@ -489,7 +489,7 @@ typedef struct VAPICEnableTPRReporting {
 
 static void vapic_do_enable_tpr_reporting(CPUState *cpu, run_on_cpu_data data)
 {
-    VAPICEnableTPRReporting *info = data.host_ptr;
+    VAPICEnableTPRReporting *info = (VAPICEnableTPRReporting *) data.host_ptr;
     apic_enable_tpr_access_reporting(info->apic, info->enable);
 }
 
@@ -739,7 +739,7 @@ static void vapic_realize(DeviceState *dev, Error **errp)
 
 static void do_vapic_enable(CPUState *cs, run_on_cpu_data data)
 {
-    VAPICROMState *s = data.host_ptr;
+    VAPICROMState *s = (VAPICROMState *) data.host_ptr;
     X86CPU *cpu = X86_CPU(cs);
 
     static const uint8_t enabled = 1;
