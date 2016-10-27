@@ -249,7 +249,6 @@ static inline run_on_cpu_data roc_host_ptr(void * p) {
     return d;
 }
 
-/* #define RUN_ON_CPU_HOST_PTR(p) ((run_on_cpu_data) (uintptr_t) p) */
 #define RUN_ON_CPU_HOST_PTR(p) roc_host_ptr(p)
 
 typedef void (*run_on_cpu_func)(CPUState *cpu, run_on_cpu_data data);

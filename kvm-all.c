@@ -2218,7 +2218,7 @@ struct kvm_set_guest_debug_data {
     int err;
 };
 
-static void kvm_invoke_set_guest_debug(CPUState *unused_cpu,
+static void kvm_invoke_set_guest_debug(CPUState *cpu,
                                        run_on_cpu_data data)
 {
     struct kvm_set_guest_debug_data *dbg_data =
@@ -2239,8 +2239,7 @@ int kvm_update_guest_debug(CPUState *cpu, unsigned long reinject_trap)
     }
     kvm_arch_update_guest_debug(cpu, &data.dbg);
 
-    run_on_cpu(cpu, kvm_invoke_set_guest_debug,
-               (run_on_cpu_data) (uintptr_t) &data);
+    run_on_cpu(cpu, kvm_invoke_set_guest_debug, RUN_ON_CPU_HOST_PTR(&data));
     return data.err;
 }
 
