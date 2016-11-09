@@ -1588,6 +1588,7 @@ static void handle_sys(DisasContext *s, uint32_t insn, bool isread,
         } else if (ri->writefn) {
             TCGv_ptr tmpptr;
             tmpptr = tcg_const_ptr(ri);
+            gen_a64_set_pc_im(s->pc);
             gen_helper_set_cp_reg64(cpu_env, tmpptr, tcg_rt);
             tcg_temp_free_ptr(tmpptr);
         } else {

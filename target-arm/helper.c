@@ -3023,18 +3023,17 @@ static void tlbi_aa64_vae3_write(CPUARMState *env, const ARMCPRegInfo *ri,
 static void tlbi_aa64_vae1is_write(CPUARMState *env, const ARMCPRegInfo *ri,
                                    uint64_t value)
 {
+    ARMCPU *cpu = arm_env_get_cpu(env);
+    CPUState *cs = CPU(cpu);
     bool sec = arm_is_secure_below_el3(env);
-    CPUState *other_cs;
     uint64_t pageaddr = sextract64(value << 12, 0, 56);
 
-    CPU_FOREACH(other_cs) {
-        if (sec) {
-            tlb_flush_page_by_mmuidx(other_cs, pageaddr, ARMMMUIdx_S1SE1,
+    if (sec) {
+        tlb_flush_all_page_by_mmuidx(cs, pageaddr, ARMMMUIdx_S1SE1,
                                      ARMMMUIdx_S1SE0, -1);
-        } else {
-            tlb_flush_page_by_mmuidx(other_cs, pageaddr, ARMMMUIdx_S12NSE1,
+    } else {
+        tlb_flush_all_page_by_mmuidx(cs, pageaddr, ARMMMUIdx_S12NSE1,
                                      ARMMMUIdx_S12NSE0, -1);
-        }
     }
 }
 
