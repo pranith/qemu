@@ -354,6 +354,39 @@ void tlb_flush_page_by_mmuidx(CPUState *cpu, target_ulong addr, ...)
     }
 }
 
+/* This function affects all vCPUs are will ensure all work is
+ * complete by the time the loop restarts
+ */
+void tlb_flush_all_page_by_mmuidx(CPUState *src_cpu, target_ulong addr, ...)
+{
+    unsigned long mmu_idx_bitmap;
+    target_ulong addr_and_mmu_idx;
+    va_list argp;
+    CPUState *other_cs;
+
+    va_start(argp, addr);
+    mmu_idx_bitmap = make_mmu_index_bitmap(argp);
+    va_end(argp);
+
+    tlb_debug("addr: "TARGET_FMT_lx" mmu_idx:%lx\n", addr, mmu_idx_bitmap);
+
+    /* This should already be page aligned */
+    addr_and_mmu_idx = addr & TARGET_PAGE_MASK;
+    addr_and_mmu_idx |= mmu_idx_bitmap;
+
+    CPU_FOREACH(other_cs) {
+        if (other_cs != src_cpu) {
+            async_run_on_cpu(other_cs, tlb_check_page_and_flush_by_mmuidx_async_work,
+                             RUN_ON_CPU_TARGET_PTR(addr_and_mmu_idx));
+        } else {
+            async_safe_run_on_cpu(other_cs, tlb_check_page_and_flush_by_mmuidx_async_work,
+                                  RUN_ON_CPU_TARGET_PTR(addr_and_mmu_idx));
+        }
+    }
+
+    cpu_loop_exit(src_cpu);
+}
+
 void tlb_flush_page_all(target_ulong addr)
 {
     CPUState *cpu;

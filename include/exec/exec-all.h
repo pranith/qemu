@@ -115,6 +115,17 @@ void tlb_flush(CPUState *cpu, int flush_global);
  */
 void tlb_flush_page_by_mmuidx(CPUState *cpu, target_ulong addr, ...);
 /**
+ * tlb_flush_all_page_by_mmuidx:
+ * @cpu: Originating CPU of the flush
+ * @addr: virtual address of page to be flushed
+ * @...: list of MMU indexes to flush, terminated by a negative value
+ *
+ * Flush one page from the TLB of all CPUs, for the specified
+ * MMU indexes. This function does not return, the run loop will exit
+ * and restart once the flush is completed.
+ */
+void tlb_flush_all_page_by_mmuidx(CPUState *cpu, target_ulong addr, ...);
+/**
  * tlb_flush_by_mmuidx:
  * @cpu: CPU whose TLB should be flushed
  * @...: list of MMU indexes to flush, terminated by a negative value
@@ -175,6 +186,10 @@ static inline void tlb_flush_page_by_mmuidx(CPUState *cpu,
 {
 }
 
+static inline void tlb_flush_all_page_by_mmuidx(CPUState *cpu,
+                                                target_ulong addr, ...)
+{
+}
 static inline void tlb_flush_by_mmuidx(CPUState *cpu, ...)
 {
 }
