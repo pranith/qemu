@@ -323,7 +323,8 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
        always be the same before a given translated block
        is executed. */
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
-    tb = atomic_rcu_read(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)]);
+    unsigned int pc_hash = tb_jmp_cache_hash_func(pc);
+    tb = atomic_rcu_read(&cpu->tb_jmp_cache[pc_hash]);
     if (unlikely(!tb || tb->pc != pc || tb->cs_base != cs_base ||
                  tb->flags != flags)) {
         tb = tb_htable_lookup(cpu, pc, cs_base, flags);
@@ -350,7 +351,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
         }
 
         /* We add the TB in the virtual pc hash table for the fast lookup */
-        atomic_set(&cpu->tb_jmp_cache[tb_jmp_cache_hash_func(pc)], tb);
+        atomic_set(&cpu->tb_jmp_cache[pc_hash], tb);
     }
 #ifndef CONFIG_USER_ONLY
     /* We don't take care of direct jumps when address mapping changes in
