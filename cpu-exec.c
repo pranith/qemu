@@ -318,7 +318,6 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     TranslationBlock *tb;
     target_ulong cs_base, pc;
     uint32_t flags;
-    bool have_tb_lock = false;
 
     /* we record a subset of the CPU state. It will
        always be the same before a given translated block
@@ -336,7 +335,6 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
              */
             mmap_lock();
             tb_lock();
-            have_tb_lock = true;
 
             /* There's a chance that our desired tb has been translated while
              * taking the locks so we check again inside the lock.
@@ -347,6 +345,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
                 tb = tb_gen_code(cpu, pc, cs_base, flags, 0);
             }
 
+            tb_unlock();
             mmap_unlock();
         }
 
@@ -364,16 +363,11 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 #endif
     /* See if we can patch the calling TB. */
     if (last_tb && !qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
-        if (!have_tb_lock) {
-            tb_lock();
-            have_tb_lock = true;
-        }
         if (!tb->invalid) {
+            tb_lock();
             tb_add_jump(last_tb, tb_exit, tb);
+            tb_unlock();
         }
-    }
-    if (have_tb_lock) {
-        tb_unlock();
     }
     return tb;
 }
