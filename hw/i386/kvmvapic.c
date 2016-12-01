@@ -462,6 +462,7 @@ static void patch_instruction(VAPICROMState *s, X86CPU *cpu, target_ulong ip)
          *  longjmps back into the cpu_exec loop. */
         tb_lock();
         tb_gen_code(cs, current_pc, current_cs_base, current_flags, 1);
+        tb_unlock();
         cpu_loop_exit_noexc(cs);
     }
 }

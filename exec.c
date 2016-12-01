@@ -2411,11 +2411,13 @@ static void check_watchpoint(int offset, int len, MemTxAttrs attrs, int flags)
                 tb_lock();
                 tb_check_watchpoint(cpu);
                 if (wp->flags & BP_STOP_BEFORE_ACCESS) {
+                    tb_unlock();
                     cpu->exception_index = EXCP_DEBUG;
                     cpu_loop_exit(cpu);
                 } else {
                     cpu_get_tb_cpu_state(env, &pc, &cs_base, &cpu_flags);
                     tb_gen_code(cpu, pc, cs_base, cpu_flags, 1);
+                    tb_unlock();
                     cpu_loop_exit_noexc(cpu);
                 }
             }
