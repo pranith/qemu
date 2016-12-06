@@ -330,6 +330,7 @@ void tcg_context_init(TCGContext *s)
 
     memset(s, 0, sizeof(*s));
     s->nb_globals = 0;
+    s->cpu_ctx = g_malloc0(smp_cpus * sizeof(*s->cpu_ctx));
 
     /* Count total number of arguments and allocate the corresponding
        space */
@@ -379,7 +380,7 @@ void tcg_context_init(TCGContext *s)
     }
 }
 
-void tcg_prologue_init(TCGContext *s)
+void cpu_prologue_init(CPUContext *s)
 {
     size_t prologue_size, total_size;
     void *buf0, *buf1;
@@ -420,6 +421,14 @@ void tcg_prologue_init(TCGContext *s)
         qemu_log_unlock();
     }
 #endif
+}
+
+void tcg_prologue_init(TCGContext *s)
+{
+    int n;
+    for (n = 0; n < smp_cpus; n++) {
+        cpu_prologue_init(s->cpu_ctx[n]);
+    }
 }
 
 void tcg_func_start(TCGContext *s)
@@ -1018,7 +1027,7 @@ static const char * const alignment_name[(MO_AMASK >> MO_ASHIFT) + 1] = {
     [MO_ALIGN_64 >> MO_ASHIFT] = "al64+",
 };
 
-void tcg_dump_ops(TCGContext *s)
+void tcg_dump_ops(CPUContext *s)
 {
     char buf[128];
     TCGOp *op;
@@ -2519,7 +2528,7 @@ void tcg_dump_op_count(FILE *f, fprintf_function cpu_fprintf)
 #endif
 
 
-int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
+int tcg_gen_code(CPUContext *s, TranslationBlock *tb)
 {
     int i, oi, oi_next, num_insns;
 

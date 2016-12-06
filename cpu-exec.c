@@ -208,12 +208,10 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
     if (max_cycles > CF_COUNT_MASK)
         max_cycles = CF_COUNT_MASK;
 
-    tb_lock();
     tb = tb_gen_code(cpu, orig_tb->pc, orig_tb->cs_base, orig_tb->flags,
                      max_cycles | CF_NOCACHE
                          | (ignore_icount ? CF_IGNORE_ICOUNT : 0));
     tb->orig_tb = orig_tb;
-    tb_unlock();
 
     /* execute the generated code */
     trace_exec_tb_nocache(tb, tb->pc);
@@ -335,7 +333,6 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
              * single threaded the locks are NOPs.
              */
             mmap_lock();
-            tb_lock();
 
             /* There's a chance that our desired tb has been translated while
              * taking the locks so we check again inside the lock.
@@ -346,7 +343,6 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
                 tb = tb_gen_code(cpu, pc, cs_base, flags, 0);
             }
 
-            tb_unlock();
             mmap_unlock();
         }
 

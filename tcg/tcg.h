@@ -637,54 +637,14 @@ QEMU_BUILD_BUG_ON(OPPARAM_BUF_SIZE > (1 << 14));
 /* Make sure that we don't overflow 64 bits without noticing.  */
 QEMU_BUILD_BUG_ON(sizeof(TCGOp) > 8);
 
-struct TCGContext {
-    uint8_t *pool_cur, *pool_end;
-    TCGPool *pool_first, *pool_current, *pool_first_large;
-    int nb_labels;
-    int nb_globals;
-    int nb_temps;
-    int nb_indirects;
-
+struct CPUContext {
     /* goto_tb support */
     tcg_insn_unit *code_buf;
     uint16_t *tb_jmp_reset_offset; /* tb->jmp_reset_offset */
     uint16_t *tb_jmp_insn_offset; /* tb->jmp_insn_offset if USE_DIRECT_JUMP */
     uintptr_t *tb_jmp_target_addr; /* tb->jmp_target_addr if !USE_DIRECT_JUMP */
 
-    TCGRegSet reserved_regs;
-    intptr_t current_frame_offset;
-    intptr_t frame_start;
-    intptr_t frame_end;
-    TCGTemp *frame_temp;
-
     tcg_insn_unit *code_ptr;
-
-    GHashTable *helpers;
-
-#ifdef CONFIG_PROFILER
-    /* profiling info */
-    int64_t tb_count1;
-    int64_t tb_count;
-    int64_t op_count; /* total insn count */
-    int op_count_max; /* max insn per TB */
-    int64_t temp_count;
-    int temp_count_max;
-    int64_t del_op_count;
-    int64_t code_in_len;
-    int64_t code_out_len;
-    int64_t search_out_len;
-    int64_t interm_time;
-    int64_t code_time;
-    int64_t la_time;
-    int64_t opt_time;
-    int64_t restore_count;
-    int64_t restore_time;
-#endif
-
-#ifdef CONFIG_DEBUG_TCG
-    int temps_in_use;
-    int goto_tb_issue_mask;
-#endif
 
     int gen_next_op_idx;
     int gen_next_parm_idx;
@@ -723,6 +683,50 @@ struct TCGContext {
 
     uint16_t gen_insn_end_off[TCG_MAX_INSNS];
     target_ulong gen_insn_data[TCG_MAX_INSNS][TARGET_INSN_START_WORDS];
+#ifdef CONFIG_PROFILER
+    /* profiling info */
+    int64_t tb_count1;
+    int64_t tb_count;
+    int64_t op_count; /* total insn count */
+    int op_count_max; /* max insn per TB */
+    int64_t temp_count;
+    int temp_count_max;
+    int64_t del_op_count;
+    int64_t code_in_len;
+    int64_t code_out_len;
+    int64_t search_out_len;
+    int64_t interm_time;
+    int64_t code_time;
+    int64_t la_time;
+    int64_t opt_time;
+    int64_t restore_count;
+    int64_t restore_time;
+#endif
+
+#ifdef CONFIG_DEBUG_TCG
+    int temps_in_use;
+    int goto_tb_issue_mask;
+#endif
+};
+
+struct TCGContext {
+    uint8_t *pool_cur, *pool_end;
+    TCGPool *pool_first, *pool_current, *pool_first_large;
+    int nb_labels;
+    int nb_globals;
+    int nb_temps;
+    int nb_indirects;
+
+    /* per-cpu context */
+    CPUContext *cpu_ctx;
+
+    TCGRegSet reserved_regs;
+    intptr_t current_frame_offset;
+    intptr_t frame_start;
+    intptr_t frame_end;
+    TCGTemp *frame_temp;
+
+    GHashTable *helpers;
 };
 
 extern TCGContext tcg_ctx;
@@ -776,7 +780,7 @@ void tcg_context_init(TCGContext *s);
 void tcg_prologue_init(TCGContext *s);
 void tcg_func_start(TCGContext *s);
 
-int tcg_gen_code(TCGContext *s, TranslationBlock *tb);
+int tcg_gen_code(CPUContext *s, TranslationBlock *tb);
 
 void tcg_set_frame(TCGContext *s, TCGReg reg, intptr_t start, intptr_t size);
 

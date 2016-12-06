@@ -1282,8 +1282,6 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
  buffer_overflow:
         /* flush must be done */
         tb_flush(cpu);
-        tb_unlock();
-        mmap_unlock();
         cpu_loop_exit(cpu);
     }
 
