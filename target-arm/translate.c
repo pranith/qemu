@@ -961,7 +961,7 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
 static inline void gen_aa32_ld##SUFF(DisasContext *s, TCGv_i32 val,         \
                                      TCGv_i32 a32, int index)               \
 {                                                                           \
-    TCGv tmp_size = 0, tmp_type = 0;                                                \
+    TCGv tmp_size = 0, tmp_type = 0;                                        \
     int size;                                                               \
                                                                             \
     if (!(strcmp(STRING(SUFF), "8u") && strcmp(STRING(SUFF), "8s")))        \
@@ -8030,19 +8030,6 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
     TCGv_i32 tmp3;
     TCGv_i32 addr;
     TCGv_i64 tmp64;
-    TCGv_i32 tmp_insn = 0, tmp_size = 0, tmp_type = 0;
-
-    if (qsim_gen_callbacks) {
-      tmp_insn = tcg_const_i32(insn);
-      tmp_size = tcg_const_i32(4);
-      tmp_type = tcg_const_i32(0);
-      gen_helper_inst_callback(tmp_insn, tmp_size, tmp_type);
-      tcg_temp_free_i32(tmp_insn);
-      tcg_temp_free_i32(tmp_size);
-      tcg_temp_free_i32(tmp_type);
-    } else {
-        gen_helper_qsim_callback();
-    }
 
     /* M variants do not implement ARM mode.  */
     if (arm_dc_feature(s, ARM_FEATURE_M)) {
@@ -9623,6 +9610,7 @@ static int disas_thumb2_insn(CPUARMState *env, DisasContext *s, uint16_t insn_hw
     int shiftop;
     int conds;
     int logic_cc;
+    TCGv_i32 tmp_insn = 0, tmp_size = 0, tmp_type = 0;
 
     if (!(arm_dc_feature(s, ARM_FEATURE_THUMB2)
           || arm_dc_feature(s, ARM_FEATURE_M))) {
@@ -9667,12 +9655,24 @@ static int disas_thumb2_insn(CPUARMState *env, DisasContext *s, uint16_t insn_hw
     }
 
     insn = arm_lduw_code(env, s->pc, s->sctlr_b);
-    s->pc += 2;
     insn |= (uint32_t)insn_hw1 << 16;
 
     if ((insn & 0xf800e800) != 0xf000e800) {
         ARCH(6T2);
     }
+
+    if (qsim_gen_callbacks) {
+      tmp_insn = tcg_const_i32(insn);
+      tmp_size = tcg_const_i32(2);
+      tmp_type = tcg_const_i32(0);
+      gen_helper_inst_callback(cpu_env, tmp_insn, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_insn);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    } else {
+        gen_helper_qsim_callback();
+    }
+    s->pc += 2;
 
     rn = (insn >> 16) & 0xf;
     rs = (insn >> 12) & 0xf;
@@ -10945,10 +10945,10 @@ static void disas_thumb_insn(CPUARMState *env, DisasContext *s)
     s->pc += 2;
 
     if (qsim_gen_callbacks) {
-      tmp_insn = tcg_const_i32(insn);
+      tmp_insn = tcg_const_i32(s->pc);
       tmp_size = tcg_const_i32(2);
       tmp_type = tcg_const_i32(0);
-      gen_helper_inst_callback(tmp_insn, tmp_size, tmp_type);
+      gen_helper_inst_callback(cpu_env, tmp_insn, tmp_size, tmp_type);
       tcg_temp_free_i32(tmp_insn);
       tcg_temp_free_i32(tmp_size);
       tcg_temp_free_i32(tmp_type);
@@ -11928,6 +11928,19 @@ void gen_intermediate_code(CPUARMState *env, TranslationBlock *tb)
             }
         } else {
             unsigned int insn = arm_ldl_code(env, dc->pc, dc->sctlr_b);
+            TCGv_i32 tmp_insn = 0, tmp_size = 0, tmp_type = 0;
+            if (qsim_gen_callbacks) {
+                tmp_insn = tcg_const_i32(insn);
+                tmp_size = tcg_const_i32(4);
+                tmp_type = tcg_const_i32(0);
+                gen_helper_inst_callback(cpu_env, tmp_insn, tmp_size, tmp_type);
+                tcg_temp_free_i32(tmp_insn);
+                tcg_temp_free_i32(tmp_size);
+                tcg_temp_free_i32(tmp_type);
+            } else {
+                gen_helper_qsim_callback();
+            }
+
             dc->pc += 4;
             disas_arm_insn(dc, insn);
         }
