@@ -29,10 +29,9 @@
 #include "qsim-context.h"
 /* broken thread support */
 
-static bool atomic_flag = false;
+extern bool atomic_flag;
 static int atomic_locked;
-static uint64_t atomic_addr;
-static int nonatomic_locked = 0;
+int nonatomic_locked = 0;
 
 extern uint64_t qsim_icount;
 uint64_t qsim_eip, qsim_locked_addr;
@@ -49,8 +48,6 @@ extern int qsim_id;
 extern int qsim_memop_flag;
 
 extern qsim_ucontext_t main_context, qemu_context;
-
-extern qsim_lockstruct *qsim_ram_l;
 
 CPUState *qsim_cpu;
 
@@ -544,8 +541,7 @@ static void memop_callback(CPUX86State *env, target_ulong vaddr,
 
         qsim_id = cs->cpu_index;
         buf = get_host_vaddr(env, vaddr, size);
-        if (buf && qsim_mem_cb(qsim_id, vaddr, (uint64_t)buf, size, type))
-            swapcontext(&qemu_context, &main_context);
+        qsim_mem_cb(qsim_id, vaddr, (uint64_t)buf, size, type);
     }
 }
 

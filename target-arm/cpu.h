@@ -37,8 +37,6 @@
 
 #include "fpu/softfloat.h"
 
-int interrupt(uint8_t vec);
-
 #define EXCP_UDEF            1   /* undefined instruction */
 #define EXCP_SWI             2   /* software interrupt */
 #define EXCP_PREFETCH_ABORT  3
