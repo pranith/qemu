@@ -544,11 +544,16 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
 static void memop_callback(CPUX86State *env, target_ulong vaddr,
         target_ulong size, int type)
 {
+    if (!qsim_mem_cb)
+        return;
+
     // pid based callbacks
     if (!qsim_sys_callbacks && curr_tpid[get_cpuidx(env)] != qsim_tpid)
         return;
 
-    if (!qsim_mem_cb)
+    int32_t vaddr_hi = ((uint64_t)vaddr >> 32) & 0xffffffff;
+    if (!qsim_sys_callbacks && (vaddr_hi == 0xffffffff ||
+                               vaddr_hi == 0xffff8800))
         return;
 
     // Handle unaligned page-crossing accessess as a series of aligned accesses.
@@ -568,7 +573,8 @@ static void memop_callback(CPUX86State *env, target_ulong vaddr,
 void helper_store_callback_pre(CPUX86State *env, uint64_t vaddr,
         uint32_t size, target_ulong data)
 {
-    memop_callback(env, vaddr, size, 1);
+    // disabled pre-store callbacks for now
+    // memop_callback(env, vaddr, size, 1);
     return;
 }
 
@@ -589,6 +595,8 @@ void helper_store_callback_post(CPUX86State *env,  uint64_t vaddr,
 
 void helper_load_callback_post(CPUX86State *env, uint64_t vaddr, uint32_t size, uint32_t type)
 {
+    // disabled post-load callbacks for now
+    // memop_callback(env, vaddr, size, type);
     return;
 }
 
