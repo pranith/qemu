@@ -973,12 +973,12 @@ static inline void gen_aa32_ld##SUFF(DisasContext *s, TCGv_i32 val,         \
 
     if (qsim_gen_callbacks) {                                               \
       tmp_size = tcg_const_i32(size);                                       \
-      tmp_type = tcg_const_i32(1);                                          \
-      gen_helper_load_callback_pre(cpu_env, a32, tmp_size, tmp_type);                \
+      tmp_type = tcg_const_i32(0);                                          \
+      gen_helper_load_callback_pre(cpu_env, a32, tmp_size, tmp_type);       \
     }                                                                       \
     gen_aa32_ld_i32(s, val, a32, index, OPC | s->be_data);                  \
     if (qsim_gen_callbacks) {                                               \
-      gen_helper_load_callback_post(cpu_env, a32, tmp_size, tmp_type);               \
+      gen_helper_load_callback_post(cpu_env, a32, tmp_size, tmp_type);      \
       tcg_temp_free_i32(tmp_size);                                          \
       tcg_temp_free_i32(tmp_type);                                          \
     }                                                                       \
@@ -1006,12 +1006,12 @@ static inline void gen_aa32_st##SUFF(DisasContext *s, TCGv_i32 val,      \
                                                                          \
     if (qsim_gen_callbacks) {                                            \
       tmp_size = tcg_const_i32(size);                                    \
-      tmp_type = tcg_const_i32(0);                                       \
-      gen_helper_store_callback_pre(cpu_env, a32, tmp_size, tmp_type);            \
+      tmp_type = tcg_const_i32(1);                                       \
+      gen_helper_store_callback_pre(cpu_env, a32, tmp_size, tmp_type);   \
     }                                                                    \
     gen_aa32_st_i32(s, val, a32, index, OPC | s->be_data);               \
     if (qsim_gen_callbacks) {                                            \
-      gen_helper_store_callback_post(cpu_env, a32, tmp_size, tmp_type);           \
+      gen_helper_store_callback_post(cpu_env, a32, tmp_size, tmp_type);  \
       tcg_temp_free_i32(tmp_size);                                       \
       tcg_temp_free_i32(tmp_type);                                       \
     }                                                                    \
@@ -1042,7 +1042,7 @@ static inline void gen_aa32_ld64(DisasContext *s, TCGv_i64 val,
 
     if (qsim_gen_callbacks) {
       tmp_size = tcg_const_i32(size);
-      tmp_type = tcg_const_i32(1);
+      tmp_type = tcg_const_i32(0);
       gen_helper_load_callback_pre(cpu_env, a32, tmp_size, tmp_type);
     }
     gen_aa32_ld_i64(s, val, a32, index, MO_Q | s->be_data);
@@ -1062,7 +1062,7 @@ static void gen_aa32_st_i64(DisasContext *s, TCGv_i64 val, TCGv_i32 a32,
 
     if (qsim_gen_callbacks) {
       tmp_size = tcg_const_i32(size);
-      tmp_type = tcg_const_i32(0);
+      tmp_type = tcg_const_i32(1);
       gen_helper_store_callback_pre(cpu_env, addr, tmp_size, tmp_type);
     }
     /* Not needed for user-mode BE32, where we use MO_BE instead.  */
