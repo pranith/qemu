@@ -254,6 +254,8 @@ io_cb_t     qsim_io_cb     = NULL;
 reg_cb_t    qsim_reg_cb    = NULL;
 trans_cb_t  qsim_trans_cb  = NULL;
 
+bool qsim_gen_callbacks = false;
+
 uint64_t	qsim_host_addr;
 uint64_t	qsim_phys_addr;
 
@@ -267,7 +269,7 @@ qemu_ramdesc_t *qsim_ram;
 int qsim_qemu_is_slave;
 void *qemu_stack;
 
-const size_t QEMU_STACK_SIZE = 8*(1<<20);
+const size_t QEMU_STACK_SIZE = 16*(1<<20);
 
 void set_atomic_cb(atomic_cb_t cb) { qsim_atomic_cb = cb; }
 void set_mem_cb   (mem_cb_t    cb) { qsim_mem_cb    = cb; }
@@ -277,6 +279,13 @@ void set_magic_cb (magic_cb_t  cb) { qsim_magic_cb  = cb; }
 void set_io_cb    (io_cb_t     cb) { qsim_io_cb     = cb; }
 void set_reg_cb   (reg_cb_t    cb) { qsim_reg_cb    = cb; }
 void set_trans_cb (trans_cb_t  cb) { qsim_trans_cb  = cb; }
+
+void set_gen_cbs  (bool state) {
+
+  // Mark all generated TBs as stale so that new TBs are generated
+
+  qsim_gen_callbacks = state;
+}
 
 static QemuOptsList qemu_rtc_opts = {
     .name = "rtc",
@@ -3149,7 +3158,6 @@ void qemu_init(qemu_ramdesc_t *ram,
         "-kernel", arm_kernel_path,
         "-initrd", arm_initrd_path,
         "-append", "root=/dev/sda2",
-        "-nographic",
 		NULL
 	};
 
@@ -4898,12 +4906,6 @@ int qsim_qemu_main(int argc, const char **argv, char **envp)
 
     os_setup_post();
 
-    //main_loop();
-    //replay_disable_events();
-    //iothread_stop_all();
-
-    //bdrv_close_all();
-    //pause_all_vcpus();
     res_free();
 
     /* vhost-user must be cleaned up before chardevs.  */
