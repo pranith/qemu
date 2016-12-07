@@ -365,9 +365,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     /* See if we can patch the calling TB. */
     if (last_tb && !qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
         if (!tb->invalid) {
-            tb_lock();
             tb_add_jump(last_tb, tb_exit, tb);
-            tb_unlock();
         }
     }
     return tb;

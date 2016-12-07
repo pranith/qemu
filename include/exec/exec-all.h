@@ -332,11 +332,10 @@ static inline void tb_set_jmp_target(TranslationBlock *tb,
 
 #endif
 
-/* Called with tb_lock held.  */
 static inline void tb_add_jump(TranslationBlock *tb, int n,
                                TranslationBlock *tb_next)
 {
-    if (tb->jmp_list_next[n]) {
+    if (atomic_cmpxchg(&tb->jmp_list_next[n], 0, tb_next->jmp_list_first)) {
         /* Another thread has already done this while we were
          * outside of the lock; nothing to do in this case */
         return;
@@ -351,7 +350,6 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
     tb_set_jmp_target(tb, n, (uintptr_t)tb_next->tc_ptr);
 
     /* add in TB jmp circular list */
-    tb->jmp_list_next[n] = tb_next->jmp_list_first;
     tb_next->jmp_list_first = (uintptr_t)tb | n;
 }
 
