@@ -281,7 +281,7 @@ void apic_deliver_irq(uint8_t dest, uint8_t dest_mode, uint8_t delivery_mode,
                            trigger_mode);
 
     apic_get_delivery_bitmask(deliver_bitmask, dest, dest_mode);
-    //apic_bus_deliver(deliver_bitmask, delivery_mode, vector_num, trigger_mode);
+    apic_bus_deliver(deliver_bitmask, delivery_mode, vector_num, trigger_mode);
 }
 
 static void apic_set_base(APICCommonState *s, uint64_t val)
@@ -623,26 +623,23 @@ static uint32_t apic_get_current_count(APICCommonState *s)
 
 static void apic_timer_update(APICCommonState *s, int64_t current_time)
 {
-    return;
 
-    /*
     if (apic_next_timer(s, current_time)) {
         timer_mod(s->timer, s->next_time);
     } else {
         timer_del(s->timer);
     }
-    */
+
+    return;
 }
 
-/*
 static void apic_timer(void *opaque)
 {
     APICCommonState *s = opaque;
 
-    //apic_local_deliver(s, APIC_LVT_TIMER);
+    apic_local_deliver(s, APIC_LVT_TIMER);
     apic_timer_update(s, s->next_time);
 }
-*/
 
 static uint32_t apic_mem_readb(void *opaque, hwaddr addr)
 {
@@ -743,8 +740,7 @@ static uint32_t apic_mem_readl(void *opaque, hwaddr addr)
         break;
     }
     trace_apic_mem_readl(addr, val);
-    //return val;
-    return 0;
+    return val;
 }
 
 static void apic_send_msi(MSIMessage *msi)
