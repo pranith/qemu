@@ -961,7 +961,7 @@ static void gen_aa32_st_i32(DisasContext *s, TCGv_i32 val, TCGv_i32 a32,
 static inline void gen_aa32_ld##SUFF(DisasContext *s, TCGv_i32 val,         \
                                      TCGv_i32 a32, int index)               \
 {                                                                           \
-    TCGv tmp_size, tmp_type;                                                \
+    TCGv tmp_size = 0, tmp_type = 0;                                                \
     int size;                                                               \
                                                                             \
     if (!(strcmp(STRING(SUFF), "8u") && strcmp(STRING(SUFF), "8s")))        \
@@ -1037,7 +1037,7 @@ static void gen_aa32_ld_i64(DisasContext *s, TCGv_i64 val, TCGv_i32 a32,
 static inline void gen_aa32_ld64(DisasContext *s, TCGv_i64 val,
                                  TCGv_i32 a32, int index)
 {
-    TCGv tmp_size, tmp_type;
+    TCGv tmp_size = 0, tmp_type = 0;
     int size = 8;
 
     if (qsim_gen_callbacks) {
@@ -8030,7 +8030,7 @@ static void disas_arm_insn(DisasContext *s, unsigned int insn)
     TCGv_i32 tmp3;
     TCGv_i32 addr;
     TCGv_i64 tmp64;
-    TCGv_i32 tmp_insn, tmp_size, tmp_type;
+    TCGv_i32 tmp_insn = 0, tmp_size = 0, tmp_type = 0;
 
     if (qsim_gen_callbacks) {
       tmp_insn = tcg_const_i32(insn);
@@ -10930,7 +10930,7 @@ static void disas_thumb_insn(CPUARMState *env, DisasContext *s)
     TCGv_i32 tmp;
     TCGv_i32 tmp2;
     TCGv_i32 addr;
-    TCGv_i32 tmp_insn, tmp_size, tmp_type;
+    TCGv_i32 tmp_insn = 0, tmp_size = 0, tmp_type = 0;
 
     if (s->condexec_mask) {
         cond = s->condexec_cond;

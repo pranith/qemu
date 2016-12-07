@@ -852,7 +852,7 @@ static void do_gpr_ld_memidx(DisasContext *s,
                              bool iss_valid, unsigned int iss_srt,
                              bool iss_sf, bool iss_ar)
 {
-    TCGv_i32 tmp_size, tmp_type;
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
     TCGMemOp memop = s->be_data + size;
 
     g_assert(size <= 3);
