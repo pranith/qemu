@@ -28,7 +28,7 @@
 #include "qemu/uuid.h"
 
 #include "qsim-vm.h"
-#include "vm-func.h"
+#include "qsim-func.h"
 #include "qsim-context.h"
 
 #ifdef CONFIG_SECCOMP
