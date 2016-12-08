@@ -1251,9 +1251,11 @@ static void deal_with_unplugged_cpus(void)
     }
 }
 
-extern int qsim_id;
-extern int run_mode;
+extern int qsim_id, run_mode;
+extern int64_t qsim_icount;
 extern bool qsim_gen_callbacks;
+
+extern void qsim_swap_ctx(void);
 
 /* Single-threaded TCG
  *
@@ -1315,6 +1317,7 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
         }
 
         while (cpu && !cpu->exit_request) {
+            int64_t icount = qsim_icount;
             atomic_mb_set(&tcg_current_rr_cpu, cpu);
             current_cpu = cpu;
 
@@ -1340,10 +1343,15 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
                 break;
             }
 
-            if (run_mode)
+            if (run_mode) {
                 cpu = NULL;
-            else
+
+                if (icount == qsim_icount) {
+                    qsim_swap_ctx();
+                }
+            } else {
                 cpu = CPU_NEXT(cpu);
+            }
         } /* while (cpu && !cpu->exit_request).. */
 
         /* Does not need atomic_mb_set because a spurious wakeup is okay.  */
