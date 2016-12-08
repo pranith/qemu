@@ -1251,6 +1251,9 @@ static void deal_with_unplugged_cpus(void)
     }
 }
 
+extern int qsim_id;
+extern int run_mode;
+
 /* Single-threaded TCG
  *
  * In the single-threaded case each vCPU is simulated in turn. If
@@ -1302,6 +1305,11 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
             cpu = first_cpu;
         }
 
+        for (; run_mode && cpu != NULL; cpu = CPU_NEXT(cpu)) {
+            if (cpu->cpu_index == qsim_id)
+                break;
+        }
+
         while (cpu && !cpu->exit_request) {
             atomic_mb_set(&tcg_current_rr_cpu, cpu);
             current_cpu = cpu;
@@ -1328,7 +1336,10 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
                 break;
             }
 
-            cpu = CPU_NEXT(cpu);
+            if (run_mode)
+                cpu = NULL;
+            else
+                cpu = CPU_NEXT(cpu);
         } /* while (cpu && !cpu->exit_request).. */
 
         /* Does not need atomic_mb_set because a spurious wakeup is okay.  */
