@@ -46,7 +46,7 @@ static TCGv_i64 cpu_pc;
 static TCGv_i64 cpu_exclusive_high;
 static TCGv_i64 cpu_reg(DisasContext *s, int reg);
 
-extern bool qsim_gen_callbacks;
+extern int qsim_gen_callbacks;
 TCGArg *itype_arg = NULL;
 
 static const char *regnames[] = {
