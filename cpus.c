@@ -1253,6 +1253,7 @@ static void deal_with_unplugged_cpus(void)
 
 extern int qsim_id;
 extern int run_mode;
+extern bool qsim_gen_callbacks;
 
 /* Single-threaded TCG
  *
@@ -1304,6 +1305,9 @@ static void *qemu_tcg_rr_cpu_thread_fn(void *arg)
         if (!cpu) {
             cpu = first_cpu;
         }
+
+        if (!qsim_gen_callbacks)
+            qsim_id = (qsim_id + 1) % smp_cpus;
 
         for (; run_mode && cpu != NULL; cpu = CPU_NEXT(cpu)) {
             if (cpu->cpu_index == qsim_id)
