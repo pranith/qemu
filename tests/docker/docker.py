@@ -12,6 +12,7 @@
 # the top-level directory.
 
 import os
+import stat
 import sys
 import subprocess
 import json
@@ -26,9 +27,6 @@ from tarfile import TarFile, TarInfo
 from StringIO import StringIO
 from shutil import copy, rmtree
 from pwd import getpwuid
-
-
-FILTERED_ENV_NAMES = ['ftp_proxy', 'http_proxy', 'https_proxy']
 
 
 DEVNULL = open(os.devnull, 'wb')
@@ -153,20 +151,12 @@ class Docker(object):
         labels = json.loads(resp)[0]["Config"].get("Labels", {})
         return labels.get("com.qemu.dockerfile-checksum", "")
 
-    def build_image(self, tag, docker_dir, dockerfile,
-                    quiet=True, user=False, argv=None):
+    def build_image(self, tag, docker_dir, dockerfile, quiet=True, argv=None):
         if argv == None:
             argv = []
 
         tmp_df = tempfile.NamedTemporaryFile(dir=docker_dir, suffix=".docker")
         tmp_df.write(dockerfile)
-
-        if user:
-            uid = os.getuid()
-            uname = getpwuid(uid).pw_name
-            tmp_df.write("\n")
-            tmp_df.write("RUN id %s 2>/dev/null || useradd -u %d -U %s" %
-                         (uname, uid, uname))
 
         tmp_df.write("\n")
         tmp_df.write("LABEL com.qemu.dockerfile-checksum=%s" %
@@ -237,9 +227,8 @@ class BuildCommand(SubCommand):
                             help="""Specify a binary that will be copied to the
                             container together with all its dependent
                             libraries""")
-        parser.add_argument("--add-current-user", "-u", dest="user",
-                            action="store_true",
-                            help="Add the current user to image's passwd")
+        parser.add_argument("--user", "-u", action="store_true",
+                            help="Add the current user to images passwd")
         parser.add_argument("tag",
                             help="Image Tag")
         parser.add_argument("dockerfile",
@@ -275,11 +264,23 @@ class BuildCommand(SubCommand):
                 _copy_binary_with_libs(args.include_executable,
                                        docker_dir)
 
-            argv += ["--build-arg=" + k.lower() + "=" + v
-                        for k, v in os.environ.iteritems()
-                        if k.lower() in FILTERED_ENV_NAMES]
+            if args.user:
+                uid = os.getuid()
+                uname = getpwuid(uid).pw_name
+                scriptlet = docker_dir+"/setup_user.sh"
+
+                # write scriptlet
+                setup = open(scriptlet, "w")
+                setup.write("#!/bin/sh\n")
+                setup.write("useradd -u %d -U %s" % (uid, uname))
+                setup.close()
+
+                st = os.stat(scriptlet)
+                os.chmod(scriptlet,
+                         st.st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
             dkr.build_image(tag, docker_dir, dockerfile,
-                            quiet=args.quiet, user=args.user, argv=argv)
+                            quiet=args.quiet, argv=argv)
 
             rmtree(docker_dir)
 
