@@ -44,7 +44,7 @@ hello-arm: hello-arm.o
 hello-arm.o: hello-arm.c
 	$(CROSS_CC) $(CFLAGS) -c -o $@ $<
 
-arm-iwmmxt: test-arm-iwmmxt.s
+arm-iwmmxt: test-arm-iwmmxt.S
 	cpp < $< | $(CROSS_CC) -Wall -static -march=iwmmxt -mabi=aapcs -x assembler - -o $@
 
 clean:
