@@ -17,11 +17,11 @@ prepare:
 
 x86_64:
 	cd $(BUILD_DIR)/x86_64-linux-user/tests/ && \
-	make -f $(SRC_PATH)/tests/tcg/i386/Makefile
+	make -f $(SRC_PATH)/tests/tcg/i386/Makefile run
 
 i386:
 	cd $(BUILD_DIR)/i386-linux-user/tests/ && \
-	make -f $(SRC_PATH)/tests/tcg/i386/Makefile
+	make -f $(SRC_PATH)/tests/tcg/i386/Makefile run
 
 arm-tcg-tests: docker-image-debian-multiarch-cross
 	mkdir -p $(BUILD_DIR)/arm-linux-user/tests
@@ -31,14 +31,16 @@ arm-tcg-tests: docker-image-debian-multiarch-cross
 		-w $(BUILD_DIR)/arm-linux-user/tests \
 		-e CROSS_CC="arm-linux-gnueabihf-gcc" \
 		qemu:debian-multiarch-cross \
-		make -f ../../../tests/tcg/misc/Makefile
+		make -f $(SRC_PATH)/tests/tcg/misc/Makefile
 	docker run --rm -it -v $(SRC_PATH):$(SRC_PATH) \
 		-v $(BUILD_DIR):$(BUILD_DIR) \
 		--user $(BUILD_ID):$(BUILD_ID) \
 		-w $(BUILD_DIR)/arm-linux-user/tests \
 		-e CROSS_CC="arm-linux-gnueabihf-gcc" \
 		qemu:debian-multiarch-cross \
-		make -f ../../../tests/tcg/arm/Makefile
+		make -f $(SRC_PATH)/tests/tcg/arm/Makefile
+	cd $(BUILD_DIR)/arm-linux-user/tests/ && \
+	make -f $(SRC_PATH)/tests/tcg/misc/Makefile run
 
 aarch64-tcg-tests: docker-image-debian-multiarch-cross
 	mkdir -p $(BUILD_DIR)/aarch64-linux-user/tests
@@ -48,13 +50,15 @@ aarch64-tcg-tests: docker-image-debian-multiarch-cross
 		-w $(BUILD_DIR)/aarch64-linux-user/tests \
 		-e CROSS_CC="aarch64-linux-gnu-gcc" \
 		qemu:debian-multiarch-cross \
-		make -f ../../../tests/tcg/misc/Makefile
+		make -f $(SRC_PATH)/tests/tcg/misc/Makefile
 	docker run --rm -it -v $(SRC_PATH):$(SRC_PATH) \
 		-v $(BUILD_DIR):$(BUILD_DIR) \
 		--user $(BUILD_ID):$(BUILD_ID) \
 		-w $(BUILD_DIR)/aarch64-linux-user/tests \
 		-e CROSS_CC="aarch64-linux-gnu-gcc" \
 		qemu:debian-multiarch-cross \
-		make -f ../../../tests/tcg/aarch64/Makefile
+		make -f $(SRC_PATH)/tests/tcg/aarch64/Makefile
+	cd $(BUILD_DIR)/aarch64-linux-user/tests/ && \
+	make -f $(SRC_PATH)/tests/tcg/misc/Makefile run
 
 .PHONY: tests-tcg

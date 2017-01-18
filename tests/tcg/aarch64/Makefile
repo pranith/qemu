@@ -20,11 +20,11 @@ CROSS_CC?=$(CC)
 
 QEMU_INCLUDES += -I$(BUILD_DIR)
 CFLAGS=-static -Wall -O2 -g -fno-strict-aliasing -nostdlib
-# LDFLAGS=-nostdlib
-LDFLAGS=
+LDFLAGS=-nostdlib
 
 TESTS=hello-aarch64
 
+run: $(patsubst %,run-%,$(I386_TESTS))
 all: $(TESTS)
 test: all
 
