@@ -63,7 +63,7 @@ run-test-x86_64: test-x86_64
 # rules to compile tests
 
 hello-i386: hello-i386.c
-	$(CC_I386) -nostdlib $(CFLAGS) -static $(LDFLAGS) -o $@ $<
+	$(CC_I386) $(QEMU_INCLUDES) -nostdlib $(CFLAGS) -static $(LDFLAGS) -o $@ $<
 	strip $@
 
 # i386/x86_64 emulation test (test various opcodes) */
