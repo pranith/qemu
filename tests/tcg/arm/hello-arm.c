@@ -1,4 +1,11 @@
-#define __NR_SYSCALL_BASE	0x900000
+#define __NR_OABI_SYSCALL_BASE  0x900000
+
+#if defined(__thumb__) || defined(__ARM_EABI__)
+#define __NR_SYSCALL_BASE	0
+#else
+#define __NR_SYSCALL_BASE	__NR_OABI_SYSCALL_BASE
+#endif
+
 #define __NR_exit1			(__NR_SYSCALL_BASE+  1)
 #define __NR_write			(__NR_SYSCALL_BASE+  4)
 
