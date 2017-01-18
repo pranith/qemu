@@ -24,6 +24,7 @@ LDFLAGS=-nostdlib
 
 TESTS=hello-arm arm-iwmmxt
 
+run: $(patsubst %,run-%,$(I386_TESTS))
 all: $(TESTS)
 test: all
 

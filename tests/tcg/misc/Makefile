@@ -34,6 +34,8 @@ test: all
 
 # rules to run tests
 
+run: $(patsubst %,run-%,$(TESTS))
+
 run-%: %
 	-$(QEMU) ./$*
 
