@@ -31,7 +31,8 @@ I386_TESTS+=test-i386 \
 	    run-test-x86_64
 endif
 
-all: $(patsubst %,run-%,$(I386_TESTS))
+run: $(patsubst %,run-%,$(I386_TESTS))
+all: $(I386_TESTS)
 test: all
 
 # rules to run tests
