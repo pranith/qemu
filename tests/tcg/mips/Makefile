@@ -18,12 +18,13 @@ QEMU=$(BUILD_DIR)/mips-linux-user/qemu-mips
 # Compiler set-up, default to system compiler if not set
 CROSS_CC?=$(CC)
 
-CFLAGS=-Wall -O2 -g -fno-strict-aliasing
-LDFLAGS=
+CFLAGS=-Wall -O2 -g -fno-strict-aliasing -static
+LDFLAGS=-nostdlib
 
 TESTS=hello-mips
 
-all: $(patsubst %,run-%,$(TESTS))
+run: $(patsubst %,run-%,$(TESTS))
+all: $(TESTS)
 test: all
 
 # rules to run tests
@@ -37,10 +38,10 @@ run-hello-mips: hello-mips
 
 # mips test
 hello-mips: hello-mips.o
-	$(CROSS_CC) -o $@ $<
+	$(CROSS_CC) $(LDFLAGS) -o $@ $<
 
 hello-mips.o: hello-mips.c
-	$(CROSS_CC) -Wall -g -O2 -c -o $@ $<
+	$(CROSS_CC) $(CFLAGS) -c -o $@ $<
 
 clean:
 	rm -f *~ *.o $(TESTS)
