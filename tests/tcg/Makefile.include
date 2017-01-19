@@ -61,4 +61,23 @@ aarch64-tcg-tests: docker-image-debian-multiarch-cross
 	cd $(BUILD_DIR)/aarch64-linux-user/tests/ && \
 	make -f $(SRC_PATH)/tests/tcg/misc/Makefile run
 
+mipsel-tcg-tests: docker-image-debian-multiarch-cross
+	mkdir -p $(BUILD_DIR)/mipsel-linux-user/tests
+	docker run --rm -it -v $(SRC_PATH):$(SRC_PATH) \
+		-v $(BUILD_DIR):$(BUILD_DIR) \
+		--user $(BUILD_ID):$(BUILD_ID) \
+		-w $(BUILD_DIR)/mipsel-linux-user/tests \
+		-e CROSS_CC="mipsel-linux-gnu-gcc" \
+		qemu:debian-multiarch-cross \
+		make -f $(SRC_PATH)/tests/tcg/misc/Makefile
+	docker run --rm -it -v $(SRC_PATH):$(SRC_PATH) \
+		-v $(BUILD_DIR):$(BUILD_DIR) \
+		--user $(BUILD_ID):$(BUILD_ID) \
+		-w $(BUILD_DIR)/mipsel-linux-user/tests \
+		-e CROSS_CC="mipsel-linux-gnu-gcc" \
+		qemu:debian-multiarch-cross \
+		make -f $(SRC_PATH)/tests/tcg/mips/Makefile
+	cd $(BUILD_DIR)/mipsel-linux-user/tests/ && \
+	make -f $(SRC_PATH)/tests/tcg/misc/Makefile run
+
 .PHONY: tests-tcg
