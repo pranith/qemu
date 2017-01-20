@@ -176,7 +176,7 @@ static inline void flush_icache_range(uintptr_t start, uintptr_t stop)
 
 static inline int get_tcg_target_mo(void)
 {
-    return TCG_MO_ALL & ~TCG_MO_LD_ST;
+    return TCG_MO_ALL & ~TCG_MO_ST_LD;
 }
 
 #define TCG_TARGET_DEFAULT_MO get_tcg_target_mo()
