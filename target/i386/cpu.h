@@ -30,6 +30,7 @@
 #define TARGET_LONG_BITS 32
 #endif
 
+#define TCG_DEFAULT_MO  ~TCG_MO_ST_LD
 /* Maximum instruction code size */
 #define TARGET_MAX_INSN_SIZE 16
 

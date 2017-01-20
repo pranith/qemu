@@ -175,7 +175,7 @@ bool mttcg_enabled;
 static bool check_tcg_memory_orders_compatible(void)
 {
 #if defined(TCG_DEFAULT_MO) && defined(TCG_TARGET_DEFAULT_MO)
-    return (TCG_DEFAULT_MO & ~TCG_TARGET_DEFAULT_MO) == 0;
+    return ((TCG_MO_ALL & TCG_TARGET_DEFAULT_MO) | (TCG_TARGET_DEFAULT_MO ^ ~TCG_DEFAULT_MO)) == TCG_MO_ALL;
 #else
     return false;
 #endif
