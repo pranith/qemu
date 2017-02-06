@@ -372,6 +372,17 @@ typedef enum {
     I3510_EON       = 0x4a200000,
     I3510_ANDS      = 0x6a000000,
 
+    /* Load-acquire, store-release instructions */
+    I3306_STLRB     = 0x08808000 | LDST_ST << 22 | MO_8  << 30,
+    I3306_STLRH     = 0x08808000 | LDST_ST << 22 | MO_16 << 30,
+    I3306_STLRW     = 0x08808000 | LDST_ST << 22 | MO_32 << 30,
+    I3306_STLRX     = 0x08808000 | LDST_ST << 22 | MO_64 << 30,
+
+    I3306_LDARB     = 0x08808000 | LDST_LD << 22 | MO_8  << 30,
+    I3306_LDARH     = 0x08808000 | LDST_LD << 22 | MO_16 << 30,
+    I3306_LDARW     = 0x08808000 | LDST_LD << 22 | MO_32 << 30,
+    I3306_LDARX     = 0x08808000 | LDST_LD << 22 | MO_64 << 30,
+
     /* System instructions.  */
     DMB_ISH         = 0xd50338bf,
     DMB_LD          = 0x00000100,
@@ -1310,6 +1321,43 @@ static void tcg_out_qemu_ld(TCGContext *s, TCGReg data_reg, TCGReg addr_reg,
 #endif /* CONFIG_SOFTMMU */
 }
 
+static void tcg_out_insn_3306(TCGContext *s, AArch64Insn insn, TCGReg rd, TCGReg rt)
+{
+    tcg_out32(s, insn | rt << 5 | rd);
+}
+
+static void tcg_out_qemu_ld_acq(TCGContext *s, TCGReg data_r, TCGReg addr_r,
+                                TCGMemOpIdx oi)
+{
+    TCGMemOp memop = get_memop(oi);
+    //const TCGType otype = TARGET_LONG_BITS == 64 ? TCG_TYPE_I64 : TCG_TYPE_I32;
+#ifdef CONFIG_SOFTMMU
+    unsigned mem_index = get_mmuidx(oi);
+    tcg_insn_unit *label_ptr;
+
+    tcg_out_tlb_read(s, addr_r, memop, &label_ptr, mem_index, 1);
+
+    switch (memop & MO_SIZE) {
+        case MO_8:
+            tcg_out_insn_3306(s, I3306_LDARB, data_r, addr_r);
+            break;
+        case MO_16:
+            tcg_out_insn_3306(s, I3306_LDARH, data_r, addr_r);
+            break;
+        case MO_32:
+            tcg_out_insn_3306(s, I3306_LDARW, data_r, addr_r);
+            break;
+        case MO_64:
+            tcg_out_insn_3306(s, I3306_LDARX, data_r, addr_r);
+            break;
+        default:
+            tcg_abort();
+    }
+    add_qemu_ldst_label(s, true, oi, (memop & MO_SIZE) == MO_64, data_r, addr_r,
+                        s->code_ptr, label_ptr);
+#endif
+}
+
 static void tcg_out_qemu_st(TCGContext *s, TCGReg data_reg, TCGReg addr_reg,
                             TCGMemOpIdx oi)
 {
@@ -1333,6 +1381,40 @@ static void tcg_out_qemu_st(TCGContext *s, TCGReg data_reg, TCGReg addr_reg,
                                addr_reg, TCG_TYPE_I64, TCG_REG_XZR);
     }
 #endif /* CONFIG_SOFTMMU */
+}
+
+static void tcg_out_qemu_st_rel(TCGContext *s, TCGReg data_r, TCGReg addr_r,
+                                TCGMemOpIdx oi)
+{
+    TCGMemOp memop = get_memop(oi);
+    //const TCGType otype = TARGET_LONG_BITS == 64 ? TCG_TYPE_I64 : TCG_TYPE_I32;
+#ifdef CONFIG_SOFTMMU
+    unsigned mem_index = get_mmuidx(oi);
+    tcg_insn_unit *label_ptr;
+    TCGType ext = 1;
+
+    tcg_out_tlb_read(s, addr_r, memop, &label_ptr, mem_index, 0);
+    tcg_out_insn(s, 3502, ADD, ext, TCG_REG_TMP, TCG_REG_X1, addr_r);
+
+    switch (memop & MO_SIZE) {
+        case MO_8:
+            tcg_out_insn_3306(s, I3306_STLRB, data_r, TCG_REG_TMP);
+            break;
+        case MO_16:
+            tcg_out_insn_3306(s, I3306_STLRH, data_r, TCG_REG_TMP);
+            break;
+        case MO_32:
+            tcg_out_insn_3306(s, I3306_STLRW, data_r, TCG_REG_TMP);
+            break;
+        case MO_64:
+            tcg_out_insn_3306(s, I3306_STLRX, data_r, TCG_REG_TMP);
+            break;
+        default:
+            tcg_abort();
+    }
+    add_qemu_ldst_label(s, false, oi, (memop & MO_SIZE) == MO_64, data_r, addr_r,
+                        s->code_ptr, label_ptr);
+#endif
 }
 
 static tcg_insn_unit *tb_ret_addr;
@@ -1637,6 +1719,13 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
         tcg_out_qemu_st(s, REG0(0), a1, a2);
         break;
 
+    case INDEX_op_qemu_ld_acq:
+        tcg_out_qemu_ld_acq(s, a0, a1, a2);
+        break;
+    case INDEX_op_qemu_st_rel:
+        tcg_out_qemu_st_rel(s, REG0(0), a1, a2);
+        break;
+
     case INDEX_op_bswap64_i64:
         tcg_out_rev64(s, a0, a1);
         break;
@@ -1852,6 +1941,8 @@ static const TCGTargetOpDef aarch64_op_defs[] = {
     { INDEX_op_mulsh_i64, { "r", "r", "r" } },
 
     { INDEX_op_mb, { } },
+    { INDEX_op_qemu_ld_acq, { "r", "l" } },
+    { INDEX_op_qemu_st_rel, { "lZ", "l" } },
     { -1 },
 };
 
