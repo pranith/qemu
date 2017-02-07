@@ -1421,6 +1421,7 @@ void tcg_optimize(TCGContext *s)
                     tcg_op_remove(s, prev_op);
                 }
                 prev_mb_args = NULL;
+                prev_op = NULL;
                 break;
             case INDEX_op_qemu_st_i32:
             case INDEX_op_qemu_st_i64:
@@ -1436,6 +1437,7 @@ void tcg_optimize(TCGContext *s)
                     tcg_op_remove(s, prev_op);
                 }
                 prev_mb_args = NULL;
+                prev_op = NULL;
                 break;
             default:
                 /* Opcodes that end the block stop the optimization.  */
@@ -1445,12 +1447,12 @@ void tcg_optimize(TCGContext *s)
             case INDEX_op_call:
                 /* Opcodes that touch guest memory stop the optimization.  */
                 prev_mb_args = NULL;
+                prev_op = NULL;
                 break;
             }
         } else if (opc == INDEX_op_mb) {
             prev_mb_args = args;
+            prev_op = op;
         }
-
-        prev_op = op;
     }
 }
