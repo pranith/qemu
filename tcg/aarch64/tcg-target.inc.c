@@ -1334,6 +1334,7 @@ static void tcg_out_qemu_ld_acq(TCGContext *s, TCGReg data_r, TCGReg addr_r,
 #ifdef CONFIG_SOFTMMU
     unsigned mem_index = get_mmuidx(oi);
     tcg_insn_unit *label_ptr;
+    TCGType ext = 1;
 
     tcg_out_tlb_read(s, addr_r, memop, &label_ptr, mem_index, 1);
     tcg_out_insn(s, 3502, ADD, ext, TCG_REG_TMP, TCG_REG_X1, addr_r);
