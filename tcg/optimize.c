@@ -1416,7 +1416,7 @@ void tcg_optimize(TCGContext *s)
                 /* fallthru */
             case INDEX_op_qemu_ld_i32:
             case INDEX_op_qemu_ld_i64:
-                if (0 && have_ld_acq) {
+                if (have_ld_acq) {
                     op->opc = INDEX_op_qemu_ld_acq;
                     tcg_op_remove(s, prev_op);
                 }
@@ -1425,13 +1425,15 @@ void tcg_optimize(TCGContext *s)
             case INDEX_op_qemu_st_i32:
             case INDEX_op_qemu_st_i64:
                 if (have_st_rel) {
+                    /*
                     TCGOp *new_op = tcg_op_insert_after(s, op, INDEX_op_qemu_st_rel, def->nb_args);
                     TCGArg *new_args = &s->gen_opparam_buf[new_op->args];
                     new_args[0] = args[0];
                     new_args[1] = args[1];
                     new_args[2] = args[2];
-                    //op->opc = INDEX_op_qemu_st_rel;
-                    //tcg_op_remove(s, prev_op);
+                    */
+                    op->opc = INDEX_op_qemu_st_rel;
+                    tcg_op_remove(s, prev_op);
                 }
                 prev_mb_args = NULL;
                 break;

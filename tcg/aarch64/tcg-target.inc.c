@@ -1336,19 +1336,20 @@ static void tcg_out_qemu_ld_acq(TCGContext *s, TCGReg data_r, TCGReg addr_r,
     tcg_insn_unit *label_ptr;
 
     tcg_out_tlb_read(s, addr_r, memop, &label_ptr, mem_index, 1);
+    tcg_out_insn(s, 3502, ADD, ext, TCG_REG_TMP, TCG_REG_X1, addr_r);
 
     switch (memop & MO_SIZE) {
         case MO_8:
-            tcg_out_insn_3306(s, I3306_LDARB, data_r, addr_r);
+            tcg_out_insn_3306(s, I3306_LDARB, data_r, TCG_REG_TMP);
             break;
         case MO_16:
-            tcg_out_insn_3306(s, I3306_LDARH, data_r, addr_r);
+            tcg_out_insn_3306(s, I3306_LDARH, data_r, TCG_REG_TMP);
             break;
         case MO_32:
-            tcg_out_insn_3306(s, I3306_LDARW, data_r, addr_r);
+            tcg_out_insn_3306(s, I3306_LDARW, data_r, TCG_REG_TMP);
             break;
         case MO_64:
-            tcg_out_insn_3306(s, I3306_LDARX, data_r, addr_r);
+            tcg_out_insn_3306(s, I3306_LDARX, data_r, TCG_REG_TMP);
             break;
         default:
             tcg_abort();
