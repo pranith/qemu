@@ -15,25 +15,29 @@ $(call set-vpath, $(SRC_PATH)/tests/tcg/i386)
 
 QEMU=$(BUILD_DIR)/i386-linux-user/qemu-i386
 QEMU_X86_64=$(BUILD_DIR)/x86_64-linux-user/qemu-x86_64
-CC_X86_64=$(CC_I386) -m64
 
 QEMU_INCLUDES += -I$(BUILD_DIR)
 CFLAGS=-Wall -O2 -g -fno-strict-aliasing
 #CFLAGS+=-msse2
 LDFLAGS=
 
+X86_64_TESTS=test-i386 \
+	     test-i386-fprem
+
 I386_TESTS=hello-i386 \
-	   test-i386-fprem
+	   $(X86_64_TESTS)
 
 # native i386 compilers sometimes are not biarch.  assume cross-compilers are
 ifneq ($(ARCH),i386)
 I386_TESTS+=test-i386 \
-	    run-test-x86_64
+	    test-x86_64
+else
+CC=$(CC_I386)
 endif
 
 run: $(patsubst %,run-%,$(I386_TESTS))
-all: $(I386_TESTS)
-test: all
+i386-tests: $(I386_TESTS)
+x86_64-tests: $(X86_64_TESTS)
 
 # rules to run tests
 
@@ -77,11 +81,11 @@ test-i386-fprem: test-i386-fprem.c
 
 test-x86_64: test-i386.c \
            test-i386.h test-i386-shift.h test-i386-muldiv.h
-	$(CC_X86_64) $(QEMU_INCLUDES) $(CFLAGS) $(LDFLAGS) -o $@ $(<D)/test-i386.c -lm
+	$(CC) $(QEMU_INCLUDES) $(CFLAGS) $(LDFLAGS) -o $@ $(<D)/test-i386.c -lm
 
 # vm86 test
 runcom: runcom.c
-	$(CC_I386) $(CFLAGS) $(LDFLAGS) -o $@ $<
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 clean:
 	rm -f *~ *.o test-i386.out test-i386.ref test-i386-fprem.out test-i386-fprem.ref \

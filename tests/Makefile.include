@@ -1,5 +1,7 @@
 export SRC_PATH
 
+-include $(SRC_PATH)/tests/tcg/Makefile.include
+
 qapi-py = $(SRC_PATH)/scripts/qapi.py $(SRC_PATH)/scripts/ordereddict.py
 
 # Get the list of all supported sysemu targets
@@ -846,6 +848,8 @@ check-qapi-schema: $(patsubst %,check-%, $(check-qapi-schema-y))
 check-qtest: $(patsubst %,check-qtest-%, $(QTEST_TARGETS))
 check-unit: $(patsubst %,check-%, $(check-unit-y))
 check-block: $(patsubst %,check-%, $(check-block-y))
+check-tcg:
+	$(MAKE) tcg-tests
 check: check-qapi-schema check-unit check-qtest
 check-clean:
 	$(MAKE) -C tests/tcg clean

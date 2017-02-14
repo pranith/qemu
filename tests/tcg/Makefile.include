@@ -8,21 +8,21 @@ export SRC_PATH
 
 BUILD_DIR?=$(CURDIR)
 
-UNAME_M := $(shell uname -m)
-BUILD_UID = $(shell id -u)
+TARGETS=arm aarch64 x86_64 i386 mipsel
 
-tests-tcg: prepare $(UNAME_M)
+tcg-tests: $(patsubst %, %-tcg-tests, $(TARGETS))
 
-prepare:
-	mkdir -p $(BUILD_DIR)/$(UNAME_M)-linux-user/tests/
-
-x86_64:
+x86_64-tcg-tests:
+	mkdir -p $(BUILD_DIR)/x86_64-linux-user/tests
 	cd $(BUILD_DIR)/x86_64-linux-user/tests/ && \
-	make -f $(SRC_PATH)/tests/tcg/i386/Makefile run
+	make -f $(SRC_PATH)/tests/tcg/misc/Makefile && \
+	make -f $(SRC_PATH)/tests/tcg/i386/Makefile
 
-i386:
+i386-tcg-tests:
+	mkdir -p $(BUILD_DIR)/i386-linux-user/tests
 	cd $(BUILD_DIR)/i386-linux-user/tests/ && \
-	make -f $(SRC_PATH)/tests/tcg/i386/Makefile run
+	make -f $(SRC_PATH)/tests/tcg/misc/Makefile && \
+	make -f $(SRC_PATH)/tests/tcg/i386/Makefile
 
 arm-tcg-tests: docker-image-debian-multiarch-cross
 	mkdir -p $(BUILD_DIR)/arm-linux-user/tests
@@ -40,8 +40,6 @@ arm-tcg-tests: docker-image-debian-multiarch-cross
 		-e CROSS_CC="arm-linux-gnueabihf-gcc" \
 		qemu:debian-multiarch-cross \
 		make -f $(SRC_PATH)/tests/tcg/arm/Makefile
-	cd $(BUILD_DIR)/arm-linux-user/tests/ && \
-	make -f $(SRC_PATH)/tests/tcg/misc/Makefile run
 
 aarch64-tcg-tests: docker-image-debian-multiarch-cross
 	mkdir -p $(BUILD_DIR)/aarch64-linux-user/tests
@@ -59,8 +57,6 @@ aarch64-tcg-tests: docker-image-debian-multiarch-cross
 		-e CROSS_CC="aarch64-linux-gnu-gcc" \
 		qemu:debian-multiarch-cross \
 		make -f $(SRC_PATH)/tests/tcg/aarch64/Makefile
-	cd $(BUILD_DIR)/aarch64-linux-user/tests/ && \
-	make -f $(SRC_PATH)/tests/tcg/misc/Makefile run
 
 mipsel-tcg-tests: docker-image-debian-multiarch-cross
 	mkdir -p $(BUILD_DIR)/mipsel-linux-user/tests
@@ -78,7 +74,5 @@ mipsel-tcg-tests: docker-image-debian-multiarch-cross
 		-e CROSS_CC="mipsel-linux-gnu-gcc" \
 		qemu:debian-multiarch-cross \
 		make -f $(SRC_PATH)/tests/tcg/mips/Makefile
-	cd $(BUILD_DIR)/mipsel-linux-user/tests/ && \
-	make -f $(SRC_PATH)/tests/tcg/misc/Makefile run
 
 .PHONY: tests-tcg
