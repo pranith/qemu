@@ -228,4 +228,7 @@ static inline void tb_target_set_jmp_target(uintptr_t tc_ptr,
 #endif
 #define TCG_TARGET_NEED_POOL_LABELS
 
+#define TCG_TARGET_HAS_ld_acq 0
+#define TCG_TARGET_HAS_st_rel 0
+
 #endif

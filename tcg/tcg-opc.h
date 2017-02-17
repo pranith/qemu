@@ -249,6 +249,11 @@ DEF(last_generic, 0, 0, 0, TCG_OPF_NOT_PRESENT)
 #include "tcg-target.opc.h"
 #endif
 
+DEF(qemu_ld_acq, DATA64_ARGS, TLADDR_ARGS, 1,
+    TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+DEF(qemu_st_rel, 0, TLADDR_ARGS + DATA64_ARGS, 1,
+    TCG_OPF_CALL_CLOBBER | TCG_OPF_SIDE_EFFECTS)
+
 #undef TLADDR_ARGS
 #undef DATA64_ARGS
 #undef IMPL
