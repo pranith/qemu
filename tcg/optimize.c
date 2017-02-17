@@ -560,6 +560,10 @@ void tcg_optimize(TCGContext *s)
 {
     int oi, oi_next, nb_temps, nb_globals;
     TCGArg *prev_mb_args = NULL;
+    bool have_ld_acq = TCG_TARGET_HAS_ld_acq;
+    bool have_st_rel = TCG_TARGET_HAS_st_rel;
+
+    //TCGOp * prev_op = NULL;
 
     /* Array VALS has an element for each temp.
        If this temp holds a constant then its value is kept in VALS' element.
@@ -1409,23 +1413,55 @@ void tcg_optimize(TCGContext *s)
                 tcg_op_remove(s, op);
                 break;
 
+                /* fallthru */
+            case INDEX_op_qemu_ld_i32:
+            case INDEX_op_qemu_ld_i64:
+                if (have_ld_acq) {
+                    /*
+                    TCGOp *new_op = tcg_op_insert_before(s, op, INDEX_op_qemu_ld_acq, def->nb_args);
+                    TCGArg *new_args = &s->gen_opparam_buf[new_op->args];
+                    new_args[0] = args[0];
+                    new_args[1] = args[1];
+                    new_args[2] = args[2];
+                    */
+                    op->opc = INDEX_op_qemu_ld_acq;
+                    //tcg_op_remove(s, prev_op);
+                }
+                prev_mb_args = NULL;
+                //prev_op = NULL;
+                break;
+            case INDEX_op_qemu_st_i32:
+            case INDEX_op_qemu_st_i64:
+                if (have_st_rel) {
+                    /*
+                    TCGOp *new_op = tcg_op_insert_after(s, op, INDEX_op_qemu_st_rel, def->nb_args);
+                    TCGArg *new_args = &s->gen_opparam_buf[new_op->args];
+                    new_args[0] = args[0];
+                    new_args[1] = args[1];
+                    new_args[2] = args[2];
+                    */
+                    op->opc = INDEX_op_qemu_st_rel;
+                    /*
+                    tcg_op_remove(s, prev_op);
+                    */
+                }
+                prev_mb_args = NULL;
+                //prev_op = NULL;
+                break;
             default:
                 /* Opcodes that end the block stop the optimization.  */
                 if ((def->flags & TCG_OPF_BB_END) == 0) {
                     break;
                 }
-                /* fallthru */
-            case INDEX_op_qemu_ld_i32:
-            case INDEX_op_qemu_ld_i64:
-            case INDEX_op_qemu_st_i32:
-            case INDEX_op_qemu_st_i64:
             case INDEX_op_call:
                 /* Opcodes that touch guest memory stop the optimization.  */
                 prev_mb_args = NULL;
+                //prev_op = NULL;
                 break;
             }
         } else if (opc == INDEX_op_mb) {
             prev_mb_args = args;
+            //prev_op = op;
         }
     }
 }

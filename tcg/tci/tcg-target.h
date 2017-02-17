@@ -87,6 +87,9 @@
 #define TCG_TARGET_HAS_mulsh_i32        0
 #define TCG_TARGET_HAS_goto_ptr         0
 
+#define TCG_TARGET_HAS_ld_acq 0
+#define TCG_TARGET_HAS_st_rel 0
+
 #if TCG_TARGET_REG_BITS == 64
 #define TCG_TARGET_HAS_extrl_i64_i32    0
 #define TCG_TARGET_HAS_extrh_i64_i32    0

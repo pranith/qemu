@@ -177,4 +177,7 @@ static inline void flush_icache_range(uintptr_t start, uintptr_t stop)
 
 #define TCG_TARGET_DEFAULT_MO (TCG_MO_ALL & ~TCG_MO_ST_LD)
 
+#define TCG_TARGET_HAS_ld_acq 0
+#define TCG_TARGET_HAS_st_rel 0
+
 #endif
