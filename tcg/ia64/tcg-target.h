@@ -183,6 +183,9 @@ typedef enum {
 #define TCG_TARGET_HAS_not_i32          0 /* xor r1, -1, r3 */
 #define TCG_TARGET_HAS_not_i64          0 /* xor r1, -1, r3 */
 
+#define TCG_TARGET_HAS_ld_acq 0
+#define TCG_TARGET_HAS_st_rel 0
+
 static inline void flush_icache_range(uintptr_t start, uintptr_t stop)
 {
     start = start & ~(32UL - 1UL);
