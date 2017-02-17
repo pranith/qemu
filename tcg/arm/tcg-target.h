@@ -125,6 +125,8 @@ extern bool use_idiv_instructions;
 #define TCG_TARGET_HAS_rem_i32          0
 #define TCG_TARGET_HAS_goto_ptr         1
 
+#define TCG_TARGET_HAS_ld_acq 0
+#define TCG_TARGET_HAS_st_rel 0
 enum {
     TCG_AREG0 = TCG_REG_R6,
 };
