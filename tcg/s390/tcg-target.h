@@ -125,6 +125,9 @@ extern uint64_t s390_facilities;
 #define TCG_TARGET_HAS_muluh_i64      0
 #define TCG_TARGET_HAS_mulsh_i64      0
 
+#define TCG_TARGET_HAS_ld_acq 0
+#define TCG_TARGET_HAS_st_rel 0
+
 /* used for function call generation */
 #define TCG_REG_CALL_STACK		TCG_REG_R15
 #define TCG_TARGET_STACK_ALIGN		8

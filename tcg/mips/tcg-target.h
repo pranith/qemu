@@ -188,6 +188,9 @@ extern bool use_mips32r2_instructions;
 #define TCG_TARGET_HAS_ext8u_i32        0 /* andi rt, rs, 0xff   */
 #define TCG_TARGET_HAS_ext16u_i32       0 /* andi rt, rs, 0xffff */
 
+#define TCG_TARGET_HAS_ld_acq 0
+#define TCG_TARGET_HAS_st_rel 0
+
 #if TCG_TARGET_REG_BITS == 64
 #define TCG_TARGET_HAS_neg_i64          0 /* sub  rd, zero, rt   */
 #define TCG_TARGET_HAS_ext8u_i64        0 /* andi rt, rs, 0xff   */
