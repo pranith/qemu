@@ -86,11 +86,19 @@ typedef void NeonGenOneOpFn(TCGv_i64, TCGv_i64);
 typedef void CryptoTwoOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32);
 typedef void CryptoThreeOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32, TCGv_i32);
 
-#define QSIM_REG_READ(reg, size)                                             \
-   (gen_helper_reg_read_callback(cpu_env, tcg_const_i32(reg), tcg_const_i32(size))) 
+#define QSIM_REG_READ(reg, size)                                         \
+do {                                                                     \
+  TCGv_i32 tmp_reg = tcg_const_i32(reg), tmp_size = tcg_const_i32(size); \
+  gen_helper_reg_read_callback(cpu_env, tmp_reg, tmp_size);              \
+  tcg_temp_free_i32(tmp_reg); tcg_temp_free_i32(tmp_size);               \
+} while(0)
 
-#define QSIM_REG_WRITE(reg, size)                                            \
-   (gen_helper_reg_write_callback(cpu_env, tcg_const_i32(reg), tcg_const_i32(size)))
+#define QSIM_REG_WRITE(reg, size)                                        \
+do {                                                                     \
+  TCGv_i32 tmp_reg = tcg_const_i32(reg), tmp_size = tcg_const_i32(size); \
+  gen_helper_reg_write_callback(cpu_env, tmp_reg, tmp_size);             \
+  tcg_temp_free_i32(tmp_reg); tcg_temp_free_i32(tmp_size);               \
+} while(0)
 
 static void qsim_set_inst_type(enum inst_type type)
 {
