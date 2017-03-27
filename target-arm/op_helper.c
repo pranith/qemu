@@ -1356,13 +1356,14 @@ int get_phys_addr(CPUARMState *env, target_ulong address,
                                 target_ulong *page_size);
 void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, uint32_t type)
 {
-	ARMCPU* cpu = arm_env_get_cpu(env);
-	CPUState* cs = CPU(cpu);
-	qsim_id = cs->cpu_index;
+    ARMCPU* cpu = arm_env_get_cpu(env);
+    CPUState* cs = CPU(cpu);
+    qsim_id = cs->cpu_index;
 
-	qsim_icount--;
-	if (qsim_icount == 0) {
-            qsim_swap_ctx();
+    qsim_icount--;
+    if (qsim_icount == 0) {
+        cs->exit_request = 1;
+        qsim_swap_ctx();
     }
 
     if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)

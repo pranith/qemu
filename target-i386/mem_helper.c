@@ -485,6 +485,7 @@ void helper_inst_callback(CPUX86State *env, target_ulong vaddr,
 
     qsim_icount--;
     if (qsim_icount == 0) {
+        cs->exit_request = 1;
         qsim_swap_ctx();
     }
 
