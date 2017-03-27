@@ -740,6 +740,7 @@ extern bool qsim_sys_callbacks;
 extern magic_cb_t qsim_magic_cb;
 extern uint64_t qsim_tpid;
 extern int qsim_id;
+extern uint64_t curr_tpid[64];
 
 extern qsim_ucontext_t main_context;
 extern qsim_ucontext_t qemu_context;
@@ -749,6 +750,7 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
 {
     ARMCPU *cpu = arm_env_get_cpu(env);
     CPUState *cs = CPU(cpu);
+    int cpu_id = cs->cpu_index;
 
     qsim_id = cs->cpu_index;
     if (value == 0xaaaaaaaa) { // start
@@ -783,6 +785,11 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
       }
     } else if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
         qsim_swap_ctx();
+    }
+
+    if ((value & 0xffff0000) == 0xc75c0000) {
+        // context switch
+        curr_tpid[cpu_id] = value & 0xffff;
     }
 
     pmccntr_sync(env);
