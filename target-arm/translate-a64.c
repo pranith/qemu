@@ -398,7 +398,9 @@ static TCGv_i64 new_tmp_a64_zero(DisasContext *s)
  */
 static TCGv_i64 cpu_reg(DisasContext *s, int reg)
 {
-    QSIM_REG_READ(reg, 4); 
+    if (qsim_gen_callbacks) {
+        QSIM_REG_WRITE(reg, 4);
+    }
     if (reg == 31) {
         return new_tmp_a64_zero(s);
     } else {
@@ -409,7 +411,9 @@ static TCGv_i64 cpu_reg(DisasContext *s, int reg)
 /* register access for when 31 == SP */
 static TCGv_i64 cpu_reg_sp(DisasContext *s, int reg)
 {
-    QSIM_REG_READ(reg, 4); 
+    if (qsim_gen_callbacks) {
+        QSIM_REG_WRITE(reg, 4);
+    }
     return cpu_X[reg];
 }
 
@@ -420,6 +424,11 @@ static TCGv_i64 cpu_reg_sp(DisasContext *s, int reg)
 static TCGv_i64 read_cpu_reg(DisasContext *s, int reg, int sf)
 {
     TCGv_i64 v = new_tmp_a64(s);
+    int size = 4;
+    if (sf)  size = 8;
+    if (qsim_gen_callbacks) {
+        QSIM_REG_READ(reg, size);
+    }
     if (reg != 31) {
         if (sf) {
             tcg_gen_mov_i64(v, cpu_X[reg]);
@@ -435,6 +444,11 @@ static TCGv_i64 read_cpu_reg(DisasContext *s, int reg, int sf)
 static TCGv_i64 read_cpu_reg_sp(DisasContext *s, int reg, int sf)
 {
     TCGv_i64 v = new_tmp_a64(s);
+    int size = 4;
+    if (sf)  size = 8;
+    if (qsim_gen_callbacks) {
+        QSIM_REG_READ(reg, size);
+    }
     if (sf) {
         tcg_gen_mov_i64(v, cpu_X[reg]);
     } else {
