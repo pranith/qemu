@@ -185,33 +185,37 @@ struct CPUAddressSpace {
 uint8_t         qsim_irq_vec     = 0;
 int             qsim_irq_pending = 0;
 static pthread_mutex_t qsim_irq_lock    = PTHREAD_MUTEX_INITIALIZER;
-
+bool qsim_run_timers = true;
 
 int interrupt(uint8_t vec) {
 
+    qsim_run_timers = true;
+    //timermod
+
     return 0;
-  int rvec = 0;
 
-  pthread_mutex_lock(&qsim_irq_lock);
-  if (qsim_irq_pending == 1  && qsim_irq_vec < vec) {
-    rvec = qsim_irq_vec;
-    qsim_irq_vec = vec;
-  } else if (qsim_irq_pending == 0) {
-    rvec = -1;
-    qsim_irq_vec = vec;
-    qsim_irq_pending = 1;
-  } else {
-    rvec = vec;
-  }
+    int rvec = 0;
 
-  // Re-notify the CPU no matter what.
-  cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
-  //qemu_notify_event();
-  pthread_mutex_unlock(&qsim_irq_lock);
+    pthread_mutex_lock(&qsim_irq_lock);
+    if (qsim_irq_pending == 1  && qsim_irq_vec < vec) {
+        rvec = qsim_irq_vec;
+        qsim_irq_vec = vec;
+    } else if (qsim_irq_pending == 0) {
+        rvec = -1;
+        qsim_irq_vec = vec;
+        qsim_irq_pending = 1;
+    } else {
+        rvec = vec;
+    }
 
-  // Give the caller the vector number of an interrupt that _won't_ be
-  // processed and needs to be queued if it is to be handled, or -1.
-  return rvec;
+    // Re-notify the CPU no matter what.
+    cpu_interrupt(first_cpu, CPU_INTERRUPT_HARD);
+    //qemu_notify_event();
+    pthread_mutex_unlock(&qsim_irq_lock);
+
+    // Give the caller the vector number of an interrupt that _won't_ be
+    // processed and needs to be queued if it is to be handled, or -1.
+    return rvec;
 }
 
 

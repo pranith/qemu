@@ -1154,21 +1154,13 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     atomic_mb_set(&exit_request, 1);
 
     while (1) {
-        if (!run_mode)
+        if (!run_mode) {
             tcg_exec_all();
-        else {
+        } else {
             int64_t icount = qsim_icount;
-            static int tries = 0;
             tcg_exec_one();
             // swap ctx if we cannot execute any instructions
-            // even after three tries
             if (icount == qsim_icount) {
-                tries++;
-            } else {
-                tries = 0;
-            }
-            if (tries >= 3) {
-                tries = 0;
                 qsim_swap_ctx();
             }
         }

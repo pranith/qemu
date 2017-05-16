@@ -233,9 +233,11 @@ static int os_host_main_loop_wait(int64_t timeout)
         static bool notified;
 
         if (!notified && !qtest_driver()) {
+            /*
             fprintf(stderr,
                     "main-loop: WARNING: I/O thread spun for %d iterations\n",
                     MAX_MAIN_LOOP_SPIN);
+            */
             notified = true;
         }
 
