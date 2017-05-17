@@ -1405,51 +1405,51 @@ void HELPER(store_callback_pre)(CPUARMState *env, uint64_t vaddr, uint32_t lengt
 
 void HELPER(store_callback_post)(CPUARMState *env, uint64_t vaddr, uint32_t length, uint32_t type)
 {
-	memop_callback(env, vaddr, length, type);
-	return;
+    memop_callback(env, vaddr, length, type);
+    return;
 }
 
 void HELPER(load_callback_pre)(CPUARMState *env, uint64_t vaddr, uint32_t length, uint32_t type)
 {
-	memop_callback(env, vaddr, length, type);
-	return;
+    memop_callback(env, vaddr, length, type);
+    return;
 }
 
 void HELPER(load_callback_post)(CPUARMState *env, uint64_t vaddr, uint32_t length, uint32_t type)
 {
-	memop_callback(env, vaddr, length, type);
-	return;
+    memop_callback(env, vaddr, length, type);
+    return;
 }
 
 CPUARMState *qsim_cpu;
 
 void HELPER(reg_read_callback)(CPUARMState *env, uint32_t reg, uint32_t length)
 {
-	if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)
-            return;
+    if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)
+        return;
 
-	ARMCPU* cpu = arm_env_get_cpu(env);
-	CPUState* cs = CPU(cpu);
-	qsim_id = cs->cpu_index;
-	if (qsim_reg_cb) {
-            qsim_reg_cb(qsim_id, reg, length, 0);
-	}
+    ARMCPU* cpu = arm_env_get_cpu(env);
+    CPUState* cs = CPU(cpu);
+    qsim_id = cs->cpu_index;
+    if (qsim_reg_cb) {
+        qsim_reg_cb(qsim_id, reg, length, 0);
+    }
 
-	return;
+    return;
 }
 
 void HELPER(reg_write_callback)(CPUARMState *env, uint32_t reg, uint32_t length)
 {
-	if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)
-            return;
+    if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)
+        return;
 
-	ARMCPU* cpu = arm_env_get_cpu(env);
-	CPUState* cs = CPU(cpu);
-	qsim_id = cs->cpu_index;
-	if (qsim_reg_cb) {
-            qsim_reg_cb(qsim_id, reg, length, 1);
-	}
-	return;
+    ARMCPU* cpu = arm_env_get_cpu(env);
+    CPUState* cs = CPU(cpu);
+    qsim_id = cs->cpu_index;
+    if (qsim_reg_cb) {
+        qsim_reg_cb(qsim_id, reg, length, 1);
+    }
+    return;
 }
 
 extern bool atomic_flag;
