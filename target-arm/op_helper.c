@@ -1092,8 +1092,12 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
         qsim_swap_ctx();
     }
 
-    if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)
-        return;
+    if (!qsim_sys_callbacks) {
+        if ((vaddr & 0xffffffff00000000) ||
+             extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid) {
+            return;
+        }
+    }
 
     if (qsim_inst_cb != NULL) {
         uint8_t *buf;
