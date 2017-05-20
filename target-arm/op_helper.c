@@ -1093,7 +1093,7 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
     }
 
     if (!qsim_sys_callbacks) {
-        if ((vaddr & 0xffffffff00000000) ||
+        if ((vaddr & 0xffff800000000000) ||
              extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid) {
             return;
         }
