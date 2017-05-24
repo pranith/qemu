@@ -276,7 +276,7 @@ int vhost_net_start(VirtIODevice *dev, NetClientState *ncs,
     BusState *qbus = BUS(qdev_get_parent_bus(DEVICE(dev)));
     VirtioBusState *vbus = VIRTIO_BUS(qbus);
     VirtioBusClass *k = VIRTIO_BUS_GET_CLASS(vbus);
-    int r, e, i, j;
+    int r, e, i;
 
     if (!k->set_guest_notifiers) {
         error_report("binding does not support guest notifiers");

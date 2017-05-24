@@ -2591,7 +2591,7 @@ static inline void gen_stack_A0(DisasContext *s)
     gen_op_movl_A0_reg(R_ESP);
     if (!s->ss32)
         tcg_gen_ext16u_tl(cpu_A0, cpu_A0);
-    tcg_gen_mov_tl(cpu_T[1], cpu_A0);
+    tcg_gen_mov_tl(cpu_T1, cpu_A0);
     if (s->addseg)
         gen_op_addl_A0_seg(s, R_SS);
 }

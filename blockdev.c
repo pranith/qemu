@@ -2485,11 +2485,9 @@ static void qmp_blockdev_insert_anon_medium(const char *device,
 
     blk_insert_bs(blk, bs);
 
-<<<<<<< HEAD
-    QTAILQ_INSERT_TAIL(&bdrv_states, bs, device_list);
 
-=======
->>>>>>> 529d45e151d82a772cd9b9af64bb25f88fba6567
+    //QTAILQ_INSERT_TAIL(&bdrv_states, bs, device_list);
+
     if (!blk_dev_has_tray(blk)) {
         /* For tray-less devices, blockdev-close-tray is a no-op (or may not be
          * called at all); therefore, the medium needs to be pushed into the
