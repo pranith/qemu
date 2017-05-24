@@ -28,7 +28,8 @@ do { printf("scsi-disk: " fmt , ## __VA_ARGS__); } while (0)
 #define DPRINTF(fmt, ...) do {} while(0)
 #endif
 
-#include "qemu-common.h"
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "hw/scsi/scsi.h"
 #include "block/scsi.h"
@@ -37,6 +38,7 @@ do { printf("scsi-disk: " fmt , ## __VA_ARGS__); } while (0)
 #include "sysemu/blockdev.h"
 #include "hw/block/block.h"
 #include "sysemu/dma.h"
+#include "qemu/cutils.h"
 
 #ifdef __linux
 #include <scsi/sg.h>
@@ -76,8 +78,6 @@ struct SCSIDiskState
     bool media_changed;
     bool media_event;
     bool eject_request;
-    uint64_t wwn;
-    uint64_t port_wwn;
     uint16_t port_index;
     uint64_t max_unmap_size;
     uint64_t max_io_size;
@@ -392,7 +392,7 @@ static void scsi_read_data(SCSIRequest *req)
         return;
     }
 
-    if (s->tray_open) {
+    if (!blk_is_available(req->dev->conf.blk)) {
         scsi_read_complete(r, -ENOMEDIUM);
         return;
     }
@@ -523,7 +523,7 @@ static void scsi_write_data(SCSIRequest *req)
         scsi_write_complete_noio(r, 0);
         return;
     }
-    if (s->tray_open) {
+    if (!blk_is_available(req->dev->conf.blk)) {
         scsi_write_complete_noio(r, -ENOMEDIUM);
         return;
     }
@@ -602,8 +602,8 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
             }
 
             l = strlen(s->serial);
-            if (l > 20) {
-                l = 20;
+            if (l > 36) {
+                l = 36;
             }
 
             DPRINTF("Inquiry EVPD[Serial number] "
@@ -632,21 +632,21 @@ static int scsi_disk_emulate_inquiry(SCSIRequest *req, uint8_t *outbuf)
             memcpy(outbuf+buflen, str, id_len);
             buflen += id_len;
 
-            if (s->wwn) {
+            if (s->qdev.wwn) {
                 outbuf[buflen++] = 0x1; // Binary
                 outbuf[buflen++] = 0x3; // NAA
                 outbuf[buflen++] = 0;   // reserved
                 outbuf[buflen++] = 8;
-                stq_be_p(&outbuf[buflen], s->wwn);
+                stq_be_p(&outbuf[buflen], s->qdev.wwn);
                 buflen += 8;
             }
 
-            if (s->port_wwn) {
+            if (s->qdev.port_wwn) {
                 outbuf[buflen++] = 0x61; // SAS / Binary
                 outbuf[buflen++] = 0x93; // PIV / Target port / NAA
                 outbuf[buflen++] = 0;    // reserved
                 outbuf[buflen++] = 8;
-                stq_be_p(&outbuf[buflen], s->port_wwn);
+                stq_be_p(&outbuf[buflen], s->qdev.port_wwn);
                 buflen += 8;
             }
 
@@ -795,10 +795,7 @@ static inline bool media_is_dvd(SCSIDiskState *s)
     if (s->qdev.type != TYPE_ROM) {
         return false;
     }
-    if (!blk_is_inserted(s->qdev.conf.blk)) {
-        return false;
-    }
-    if (s->tray_open) {
+    if (!blk_is_available(s->qdev.conf.blk)) {
         return false;
     }
     blk_get_geometry(s->qdev.conf.blk, &nb_sectors);
@@ -811,10 +808,7 @@ static inline bool media_is_cd(SCSIDiskState *s)
     if (s->qdev.type != TYPE_ROM) {
         return false;
     }
-    if (!blk_is_inserted(s->qdev.conf.blk)) {
-        return false;
-    }
-    if (s->tray_open) {
+    if (!blk_is_available(s->qdev.conf.blk)) {
         return false;
     }
     blk_get_geometry(s->qdev.conf.blk, &nb_sectors);
@@ -878,7 +872,7 @@ static int scsi_read_dvd_structure(SCSIDiskState *s, SCSIDiskReq *r,
     }
 
     if (format != 0xff) {
-        if (s->tray_open || !blk_is_inserted(s->qdev.conf.blk)) {
+        if (!blk_is_available(s->qdev.conf.blk)) {
             scsi_check_condition(r, SENSE_CODE(NO_MEDIUM));
             return -1;
         }
@@ -1874,7 +1868,7 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
         break;
 
     default:
-        if (s->tray_open || !blk_is_inserted(s->qdev.conf.blk)) {
+        if (!blk_is_available(s->qdev.conf.blk)) {
             scsi_check_condition(r, SENSE_CODE(NO_MEDIUM));
             return 0;
         }
@@ -1903,7 +1897,7 @@ static int32_t scsi_disk_emulate_command(SCSIRequest *req, uint8_t *buf)
     memset(outbuf, 0, r->buflen);
     switch (req->cmd.buf[0]) {
     case TEST_UNIT_READY:
-        assert(!s->tray_open && blk_is_inserted(s->qdev.conf.blk));
+        assert(blk_is_available(s->qdev.conf.blk));
         break;
     case INQUIRY:
         buflen = scsi_disk_emulate_inquiry(req, outbuf);
@@ -2142,7 +2136,7 @@ static int32_t scsi_disk_dma_command(SCSIRequest *req, uint8_t *buf)
 
     command = buf[0];
 
-    if (s->tray_open || !blk_is_inserted(s->qdev.conf.blk)) {
+    if (!blk_is_available(s->qdev.conf.blk)) {
         scsi_check_condition(r, SENSE_CODE(NO_MEDIUM));
         return 0;
     }
@@ -2574,6 +2568,7 @@ static void scsi_block_realize(SCSIDevice *dev, Error **errp)
     s->features |= (1 << SCSI_DISK_F_NO_REMOVABLE_DEVOPS);
 
     scsi_realize(&s->qdev, errp);
+    scsi_generic_read_device_identification(&s->qdev);
 }
 
 static bool scsi_block_is_passthrough(SCSIDiskState *s, uint8_t *buf)
@@ -2667,8 +2662,8 @@ static Property scsi_hd_properties[] = {
                     SCSI_DISK_F_REMOVABLE, false),
     DEFINE_PROP_BIT("dpofua", SCSIDiskState, features,
                     SCSI_DISK_F_DPOFUA, false),
-    DEFINE_PROP_UINT64("wwn", SCSIDiskState, wwn, 0),
-    DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, port_wwn, 0),
+    DEFINE_PROP_UINT64("wwn", SCSIDiskState, qdev.wwn, 0),
+    DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, qdev.port_wwn, 0),
     DEFINE_PROP_UINT16("port_index", SCSIDiskState, port_index, 0),
     DEFINE_PROP_UINT64("max_unmap_size", SCSIDiskState, max_unmap_size,
                        DEFAULT_MAX_UNMAP_SIZE),
@@ -2717,8 +2712,8 @@ static const TypeInfo scsi_hd_info = {
 
 static Property scsi_cd_properties[] = {
     DEFINE_SCSI_DISK_PROPERTIES(),
-    DEFINE_PROP_UINT64("wwn", SCSIDiskState, wwn, 0),
-    DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, port_wwn, 0),
+    DEFINE_PROP_UINT64("wwn", SCSIDiskState, qdev.wwn, 0),
+    DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, qdev.port_wwn, 0),
     DEFINE_PROP_UINT16("port_index", SCSIDiskState, port_index, 0),
     DEFINE_PROP_UINT64("max_io_size", SCSIDiskState, max_io_size,
                        DEFAULT_MAX_IO_SIZE),
@@ -2782,8 +2777,8 @@ static Property scsi_disk_properties[] = {
                     SCSI_DISK_F_REMOVABLE, false),
     DEFINE_PROP_BIT("dpofua", SCSIDiskState, features,
                     SCSI_DISK_F_DPOFUA, false),
-    DEFINE_PROP_UINT64("wwn", SCSIDiskState, wwn, 0),
-    DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, port_wwn, 0),
+    DEFINE_PROP_UINT64("wwn", SCSIDiskState, qdev.wwn, 0),
+    DEFINE_PROP_UINT64("port_wwn", SCSIDiskState, qdev.port_wwn, 0),
     DEFINE_PROP_UINT16("port_index", SCSIDiskState, port_index, 0),
     DEFINE_PROP_UINT64("max_unmap_size", SCSIDiskState, max_unmap_size,
                        DEFAULT_MAX_UNMAP_SIZE),

@@ -18,6 +18,7 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include "hw/hw.h"
 #include "hw/pci/pci.h"
 #include "sysemu/dma.h"
@@ -649,7 +650,9 @@ static int megasas_init_firmware(MegasasState *s, MegasasCmd *cmd)
     pa_hi = le32_to_cpu(initq->pi_addr_hi);
     s->producer_pa = ((uint64_t) pa_hi << 32) | pa_lo;
     s->reply_queue_head = ldl_le_pci_dma(pcid, s->producer_pa);
+    s->reply_queue_head %= MEGASAS_MAX_FRAMES;
     s->reply_queue_tail = ldl_le_pci_dma(pcid, s->consumer_pa);
+    s->reply_queue_tail %= MEGASAS_MAX_FRAMES;
     flags = le32_to_cpu(initq->flags);
     if (flags & MFI_QUEUE_FLAG_CONTEXT64) {
         s->flags |= MEGASAS_MASK_USE_QUEUE64;
@@ -744,7 +747,7 @@ static int megasas_ctrl_get_info(MegasasState *s, MegasasCmd *cmd)
     info.device.type = MFI_INFO_DEV_SAS3G;
     info.device.port_count = 8;
     QTAILQ_FOREACH(kid, &s->bus.qbus.children, sibling) {
-        SCSIDevice *sdev = DO_UPCAST(SCSIDevice, qdev, kid->child);
+        SCSIDevice *sdev = SCSI_DEVICE(kid->child);
         uint16_t pd_id;
 
         if (num_pd_disks < 8) {
@@ -770,6 +773,7 @@ static int megasas_ctrl_get_info(MegasasState *s, MegasasCmd *cmd)
 
         ptr = memory_region_get_ram_ptr(&pci_dev->rom);
         memcpy(biosver, ptr + 0x41, 31);
+        biosver[31] = 0;
         memcpy(info.image_component[1].name, "BIOS", 4);
         memcpy(info.image_component[1].version, biosver,
                strlen((const char *)biosver));
@@ -960,7 +964,7 @@ static int megasas_dcmd_pd_get_list(MegasasState *s, MegasasCmd *cmd)
         max_pd_disks = MFI_MAX_SYS_PDS;
     }
     QTAILQ_FOREACH(kid, &s->bus.qbus.children, sibling) {
-        SCSIDevice *sdev = DO_UPCAST(SCSIDevice, qdev, kid->child);
+        SCSIDevice *sdev = SCSI_DEVICE(kid->child);
         uint16_t pd_id;
 
         if (num_pd_disks >= max_pd_disks)
@@ -1136,7 +1140,7 @@ static int megasas_dcmd_ld_get_list(MegasasState *s, MegasasCmd *cmd)
         max_ld_disks = MFI_MAX_LD;
     }
     QTAILQ_FOREACH(kid, &s->bus.qbus.children, sibling) {
-        SCSIDevice *sdev = DO_UPCAST(SCSIDevice, qdev, kid->child);
+        SCSIDevice *sdev = SCSI_DEVICE(kid->child);
 
         if (num_ld_disks >= max_ld_disks) {
             break;
@@ -1187,7 +1191,7 @@ static int megasas_dcmd_ld_list_query(MegasasState *s, MegasasCmd *cmd)
         max_ld_disks = MFI_MAX_LD;
     }
     QTAILQ_FOREACH(kid, &s->bus.qbus.children, sibling) {
-        SCSIDevice *sdev = DO_UPCAST(SCSIDevice, qdev, kid->child);
+        SCSIDevice *sdev = SCSI_DEVICE(kid->child);
 
         if (num_ld_disks >= max_ld_disks) {
             break;
@@ -1292,7 +1296,7 @@ static int megasas_dcmd_ld_get_info(MegasasState *s, MegasasCmd *cmd)
 
 static int megasas_dcmd_cfg_read(MegasasState *s, MegasasCmd *cmd)
 {
-    uint8_t data[4096];
+    uint8_t data[4096] = { 0 };
     struct mfi_config_data *info;
     int num_pd_disks = 0, array_offset, ld_offset;
     BusChild *kid;
@@ -1327,7 +1331,7 @@ static int megasas_dcmd_cfg_read(MegasasState *s, MegasasCmd *cmd)
     ld_offset = array_offset + sizeof(struct mfi_array) * num_pd_disks;
 
     QTAILQ_FOREACH(kid, &s->bus.qbus.children, sibling) {
-        SCSIDevice *sdev = DO_UPCAST(SCSIDevice, qdev, kid->child);
+        SCSIDevice *sdev = SCSI_DEVICE(kid->child);
         uint16_t sdev_id = ((sdev->id & 0xFF) << 8) | (sdev->lun & 0xFF);
         struct mfi_array *array;
         struct mfi_ld_config *ld;
@@ -1445,7 +1449,7 @@ static int megasas_dcmd_set_properties(MegasasState *s, MegasasCmd *cmd)
                                             dcmd_size);
         return MFI_STAT_INVALID_PARAMETER;
     }
-    dma_buf_write((uint8_t *)&info, cmd->iov_size, &cmd->qsg);
+    dma_buf_write((uint8_t *)&info, dcmd_size, &cmd->qsg);
     trace_megasas_dcmd_unsupported(cmd->index, cmd->iov_size);
     return MFI_STAT_OK;
 }
@@ -2237,7 +2241,7 @@ static void megasas_soft_reset(MegasasState *s)
          * after the initial reset.
          */
         QTAILQ_FOREACH(kid, &s->bus.qbus.children, sibling) {
-            SCSIDevice *sdev = DO_UPCAST(SCSIDevice, qdev, kid->child);
+            SCSIDevice *sdev = SCSI_DEVICE(kid->child);
 
             sdev->unit_attention = SENSE_CODE(NO_SENSE);
             scsi_device_unit_attention_reported(sdev);

@@ -10,8 +10,10 @@
  * See the COPYING.LIB file in the top-level directory.
  */
 
+#include "qemu/osdep.h"
 #include <glib.h>
 #include "block/aio.h"
+#include "qapi/error.h"
 #include "qemu/timer.h"
 #include "qemu/sockets.h"
 #include "qemu/error-report.h"
@@ -451,7 +453,7 @@ static void test_timer_schedule(void)
 {
     TimerTestData data = { .n = 0, .ctx = ctx, .ns = SCALE_MS * 750LL,
                            .max = 2,
-                           .clock_type = QEMU_CLOCK_VIRTUAL };
+                           .clock_type = QEMU_CLOCK_REALTIME };
     EventNotifier e;
 
     /* aio_poll will not block to wait for timers to complete unless it has
@@ -781,7 +783,7 @@ static void test_source_timer_schedule(void)
 {
     TimerTestData data = { .n = 0, .ctx = ctx, .ns = SCALE_MS * 750LL,
                            .max = 2,
-                           .clock_type = QEMU_CLOCK_VIRTUAL };
+                           .clock_type = QEMU_CLOCK_REALTIME };
     EventNotifier e;
     int64_t expiry;
 
@@ -832,9 +834,7 @@ int main(int argc, char **argv)
 
     ctx = aio_context_new(&local_error);
     if (!ctx) {
-        error_report("Failed to create AIO Context: '%s'",
-                     error_get_pretty(local_error));
-        error_free(local_error);
+        error_reportf_err(local_error, "Failed to create AIO Context: ");
         exit(1);
     }
     src = aio_get_g_source(ctx);

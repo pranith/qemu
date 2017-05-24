@@ -26,7 +26,7 @@
  * THE SOFTWARE.
  */
 
-#include "config-host.h"
+#include "qemu/osdep.h"
 
 /* This needs to be before jpeglib.h line because of conflict with
    INT32 definitions between jmorecfg.h (included by jpeglib.h) and
@@ -40,7 +40,6 @@
 #include <png.h>
 #endif
 #ifdef CONFIG_VNC_JPEG
-#include <stdio.h>
 #include <jpeglib.h>
 #endif
 
@@ -462,9 +461,10 @@ static int tight_fill_palette(VncState *vs, int x, int y,
                                                                         \
         src = (uint##bpp##_t *) buf;                                    \
                                                                         \
-        for (i = 0; i < count; i++) {                                   \
+        for (i = 0; i < count; ) {                                      \
                                                                         \
             rgb = *src++;                                               \
+            i++;                                                        \
             rep = 0;                                                    \
             while (i < count && *src == rgb) {                          \
                 rep++, src++, i++;                                      \

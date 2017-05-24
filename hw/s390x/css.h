@@ -12,12 +12,14 @@
 #ifndef CSS_H
 #define CSS_H
 
+#include "hw/s390x/adapter.h"
+#include "hw/s390x/s390_flic.h"
 #include "ioinst.h"
 
 /* Channel subsystem constants. */
 #define MAX_SCHID 65535
 #define MAX_SSID 3
-#define MAX_CSSID 254 /* 255 is reserved */
+#define MAX_CSSID 255
 #define MAX_CHPID 255
 
 #define MAX_CIWS 62
@@ -86,6 +88,18 @@ struct SubchDev {
     void *driver_data;
 };
 
+typedef struct IndAddr {
+    hwaddr addr;
+    uint64_t map;
+    unsigned long refcnt;
+    int len;
+    QTAILQ_ENTRY(IndAddr) sibling;
+} IndAddr;
+
+IndAddr *get_indicator(hwaddr ind_addr, int len);
+void release_indicator(AdapterInfo *adapter, IndAddr *indicator);
+int map_indicator(AdapterInfo *adapter, IndAddr *indicator);
+
 typedef SubchDev *(*css_subch_cb_func)(uint8_t m, uint8_t cssid, uint8_t ssid,
                                        uint16_t schid);
 void subch_device_save(SubchDev *s, QEMUFile *f);
@@ -103,6 +117,7 @@ void css_generate_sch_crws(uint8_t cssid, uint8_t ssid, uint16_t schid,
                            int hotplugged, int add);
 void css_generate_chp_crws(uint8_t cssid, uint8_t chpid);
 void css_generate_css_crws(uint8_t cssid);
+void css_clear_sei_pending(void);
 void css_adapter_interrupt(uint8_t isc);
 
 #define CSS_IO_ADAPTER_VIRTIO 1

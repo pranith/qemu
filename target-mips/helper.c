@@ -16,15 +16,12 @@
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
-#include <stdarg.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <string.h>
-#include <inttypes.h>
+#include "qemu/osdep.h"
 
 #include "cpu.h"
 #include "sysemu/kvm.h"
 #include "exec/cpu_ldst.h"
+#include "exec/log.h"
 
 enum {
     TLBRET_XI = -6,
@@ -542,7 +539,7 @@ void mips_cpu_do_interrupt(CPUState *cs)
         break;
     case EXCP_SRESET:
         env->CP0_Status |= (1 << CP0St_SR);
-        memset(env->CP0_WatchLo, 0, sizeof(*env->CP0_WatchLo));
+        memset(env->CP0_WatchLo, 0, sizeof(env->CP0_WatchLo));
         goto set_error_EPC;
     case EXCP_NMI:
         env->CP0_Status |= (1 << CP0St_NMI);
