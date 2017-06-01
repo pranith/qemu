@@ -64,16 +64,10 @@
 /* make various TB consistency checks */
 /* #define DEBUG_TB_CHECK */
 
-#if !defined(CONFIG_USER_ONLY)
-/* TB consistency checks only implemented for usermode emulation.  */
-#undef DEBUG_TB_CHECK
-#endif
-
-/* Access to the various translations structures need to be serialised via locks
- * for consistency. This is automatic for SoftMMU based system
- * emulation due to its single threaded nature. In user-mode emulation
- * access to the memory related structures are protected with the
- * mmap_lock.
+/* Access to the various translations structures need to be serialised
+ * via locks for consistency. Access to the memory related structures
+ * are protected with mmap_lock in user mode emulation and tb_lock in
+ * softMMU emulation.
  */
 #ifdef CONFIG_SOFTMMU
 #define assert_memory_lock() tcg_debug_assert(have_tb_lock)
@@ -1372,10 +1366,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     if ((pc & TARGET_PAGE_MASK) != virt_page2) {
         phys_page2 = get_page_addr_code(env, virt_page2);
     }
-    /* As long as consistency of the TB stuff is provided by tb_lock in user
-     * mode and is implicit in single-threaded softmmu emulation, no explicit
-     * memory barrier is required before tb_link_page() makes the TB visible
-     * through the physical hash table and physical page list.
+    /* As long as consistency of the TB stuff is provided by mmap_lock
+     * in user mode and mmap_lock in softmmu emulation, no explicit
+     * memory barrier is required before tb_link_page() makes the TB
+     * visible through the physical hash table and physical page list.
      */
     tb_link_page(tb, phys_pc, phys_page2);
     return tb;
