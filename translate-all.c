@@ -1423,14 +1423,12 @@ void tb_invalidate_phys_page_range(tb_page_addr_t start, tb_page_addr_t end,
                                    int is_cpu_write_access)
 {
     TranslationBlock *tb, *tb_next;
-#if defined(TARGET_HAS_PRECISE_SMC)
-    CPUState *cpu = current_cpu;
-    CPUArchState *env = NULL;
-#endif
     tb_page_addr_t tb_start, tb_end;
     PageDesc *p;
     int n;
 #ifdef TARGET_HAS_PRECISE_SMC
+    CPUState *cpu = current_cpu;
+    CPUArchState *env = NULL;
     int current_tb_not_found = is_cpu_write_access;
     TranslationBlock *current_tb = NULL;
     int current_tb_modified = 0;
