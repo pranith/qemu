@@ -1390,8 +1390,8 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
         tcg_debug_assert(s->tb_jmp_target_addr != NULL);
         uintptr_t offset = tcg_pcrel_diff(s, (s->tb_jmp_target_addr + a0));
         tcg_debug_assert(offset == sextract64(offset, 0, 19));
-        tcg_out_insn_3305(s, I3305_LDR, offset, TCG_REG_TMP);
-        tcg_out_callr(s, TCG_REG_TMP);
+        tcg_out_insn_3305(s, I3305_LDR, offset >> 2, TCG_REG_TMP);
+        tcg_out_insn(s, 3207, BR, TCG_REG_TMP);
         s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
 #endif
         break;
