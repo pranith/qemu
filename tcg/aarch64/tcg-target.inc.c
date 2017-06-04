@@ -269,6 +269,8 @@ typedef enum {
     I3207_BLR       = 0xd63f0000,
     I3207_RET       = 0xd65f0000,
 
+    /* Load literal for loading the address at pc-relative offset */
+    I3305_LDR       = 0x58000000,
     /* Load/store register.  Described here as 3.3.12, but the helper
        that emits them can transform to 3.3.10 or 3.3.13.  */
     I3312_STRB      = 0x38000000 | LDST_ST << 22 | MO_8 << 30,
@@ -387,6 +389,11 @@ static inline uint32_t tcg_in32(TCGContext *s)
 /* Emit an opcode with "type-checking" of the format.  */
 #define tcg_out_insn(S, FMT, OP, ...) \
     glue(tcg_out_insn_,FMT)(S, glue(glue(glue(I,FMT),_),OP), ## __VA_ARGS__)
+
+static void tcg_out_insn_3305(TCGContext *s, AArch64Insn insn, int imm19, TCGReg rt)
+{
+    tcg_out32(s, insn | (imm19 & 0x7ffff) << 5 | rt);
+}
 
 static void tcg_out_insn_3201(TCGContext *s, AArch64Insn insn, TCGType ext,
                               TCGReg rt, int imm19)
@@ -847,6 +854,8 @@ static inline void tcg_out_call(TCGContext *s, tcg_insn_unit *target)
     }
 }
 
+#if defined(USE_DIRECT_JUMP)
+
 void aarch64_tb_set_jmp_target(uintptr_t jmp_addr, uintptr_t addr)
 {
     tcg_insn_unit *code_ptr = (tcg_insn_unit *)jmp_addr;
@@ -855,6 +864,8 @@ void aarch64_tb_set_jmp_target(uintptr_t jmp_addr, uintptr_t addr)
     reloc_pc26_atomic(code_ptr, target);
     flush_icache_range(jmp_addr, jmp_addr + 4);
 }
+
+#endif
 
 static inline void tcg_out_goto_label(TCGContext *s, TCGLabel *l)
 {
@@ -1367,9 +1378,7 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
         break;
 
     case INDEX_op_goto_tb:
-#ifndef USE_DIRECT_JUMP
-#error "USE_DIRECT_JUMP required for aarch64"
-#endif
+#ifdef USE_DIRECT_JUMP
         /* consistency for USE_DIRECT_JUMP */
         tcg_debug_assert(s->tb_jmp_insn_offset != NULL);
         s->tb_jmp_insn_offset[a0] = tcg_current_code_size(s);
@@ -1377,6 +1386,14 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
            aarch64_tb_set_jmp_target later, beware retranslation. */
         tcg_out_goto_noaddr(s);
         s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
+#else
+        tcg_debug_assert(s->tb_jmp_target_addr != NULL);
+        uintptr_t offset = tcg_pcrel_diff(s, (s->tb_jmp_target_addr + a0));
+        tcg_debug_assert(offset == sextract64(offset, 0, 19));
+        tcg_out_insn_3305(s, I3305_LDR, offset, TCG_REG_TMP);
+        tcg_out_callr(s, TCG_REG_TMP);
+        s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
+#endif
         break;
 
     case INDEX_op_goto_ptr:

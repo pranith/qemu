@@ -303,7 +303,7 @@ static inline void tlb_flush_by_mmuidx_all_cpus_synced(CPUState *cpu,
 
 #if defined(__arm__) || defined(_ARCH_PPC) \
     || defined(__x86_64__) || defined(__i386__) \
-    || defined(__sparc__) || defined(__aarch64__) \
+    || defined(__sparc__) \
     || defined(__s390x__) || defined(__mips__) \
     || defined(CONFIG_TCG_INTERPRETER)
 /* NOTE: Direct jump patching must be atomic to be thread-safe. */
