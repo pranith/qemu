@@ -1360,7 +1360,7 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
     TCGArg a0 = args[0];
     TCGArg a1 = args[1];
     TCGArg a2 = args[2];
-    int c2 = const_args[2];
+    int c2 = const_args[2], offset;
 
     /* Some operands are defined with "rZ" constraint, a register or
        the zero register.  These need not actually test args[I] == 0.  */
@@ -1378,22 +1378,19 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
         break;
 
     case INDEX_op_goto_tb:
-#ifdef USE_DIRECT_JUMP
-        /* consistency for USE_DIRECT_JUMP */
-        tcg_debug_assert(s->tb_jmp_insn_offset != NULL);
-        s->tb_jmp_insn_offset[a0] = tcg_current_code_size(s);
-        /* actual branch destination will be patched by
-           aarch64_tb_set_jmp_target later, beware retranslation. */
-        tcg_out_goto_noaddr(s);
+        if(s->tb_jmp_insn_offset != NULL) {
+            /* USE_DIRECT_JMP */
+            s->tb_jmp_insn_offset[a0] = tcg_current_code_size(s);
+            /* actual branch destination will be patched by
+               aarch64_tb_set_jmp_target later, beware retranslation. */
+            tcg_out_goto_noaddr(s);
+        } else if (s->tb_jmp_target_addr != NULL) {
+            /* !USE_DIRECT_JMP */
+            offset = tcg_pcrel_diff(s, (s->tb_jmp_target_addr + a0)) >> 2;
+            tcg_out_insn_3305(s, I3305_LDR, offset, TCG_REG_TMP);
+            tcg_out_insn(s, 3207, BR, TCG_REG_TMP);
+        }
         s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
-#else
-        tcg_debug_assert(s->tb_jmp_target_addr != NULL);
-        uintptr_t offset = tcg_pcrel_diff(s, (s->tb_jmp_target_addr + a0));
-        tcg_debug_assert(offset == sextract64(offset, 0, 19));
-        tcg_out_insn_3305(s, I3305_LDR, offset >> 2, TCG_REG_TMP);
-        tcg_out_insn(s, 3207, BR, TCG_REG_TMP);
-        s->tb_jmp_reset_offset[a0] = tcg_current_code_size(s);
-#endif
         break;
 
     case INDEX_op_goto_ptr:

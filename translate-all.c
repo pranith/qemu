@@ -779,7 +779,7 @@ static inline void code_gen_alloc(size_t tb_size)
     tcg_ctx.tb_ctx.tbs_size =
         tcg_ctx.code_gen_buffer_size / CODE_GEN_AVG_BLOCK_SIZE / 8;
     if (unlikely(!tcg_ctx.tb_ctx.tbs_size)) {
-        tcg_ctx.tb_ctx.tbs_size = 1024;
+        tcg_ctx.tb_ctx.tbs_size = 1 << 15;
     }
     tcg_ctx.tb_ctx.tbs = g_new(TranslationBlock *, tcg_ctx.tb_ctx.tbs_size);
 
@@ -912,12 +912,12 @@ static void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
         goto done;
     }
 
-#if defined(DEBUG_TB_FLUSH)
     printf("qemu: flush code_size=%ld nb_tbs=%d avg_tb_size=%ld\n",
            (unsigned long)(tcg_ctx.code_gen_ptr - tcg_ctx.code_gen_buffer),
            tcg_ctx.tb_ctx.nb_tbs, tcg_ctx.tb_ctx.nb_tbs > 0 ?
            ((unsigned long)(tcg_ctx.code_gen_ptr - tcg_ctx.code_gen_buffer)) /
            tcg_ctx.tb_ctx.nb_tbs : 0);
+#if defined(DEBUG_TB_FLUSH)
 #endif
     if ((unsigned long)(tcg_ctx.code_gen_ptr - tcg_ctx.code_gen_buffer)
         > tcg_ctx.code_gen_buffer_size) {
