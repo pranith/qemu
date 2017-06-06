@@ -1370,10 +1370,12 @@ static void tcg_out_op(TCGContext *s, TCGOpcode opc,
     case INDEX_op_exit_tb:
         /* Reuse the zeroing that exists for goto_ptr.  */
         if (a0 == 0) {
-            tcg_out_goto(s, s->code_gen_epilogue);
+            tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP, (uintptr_t)(s->code_gen_epilogue));
+            tcg_out_insn(s, 3207, BR, TCG_REG_TMP);
         } else {
             tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_X0, a0);
-            tcg_out_goto(s, tb_ret_addr);
+            tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP, (uintptr_t)(tb_ret_addr));
+            tcg_out_insn(s, 3207, BR, TCG_REG_TMP);
         }
         break;
 
