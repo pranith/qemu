@@ -152,6 +152,14 @@ void *HELPER(lookup_tb_ptr)(CPUArchState *env, target_ulong addr)
     target_ulong cs_base, pc;
     uint32_t flags, addr_hash;
 
+    /* If there is an interrupt pending request or the TCG exit flag
+     * has been set we might as well stop here and return to the main
+     * loop.
+     */
+    if (unlikely(cpu->icount_decr.u16.high || cpu->interrupt_request)) {
+        return ret;
+    }
+
     addr_hash = tb_jmp_cache_hash_func(addr);
     tb = atomic_rcu_read(&cpu->tb_jmp_cache[addr_hash]);
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
