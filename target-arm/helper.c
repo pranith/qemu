@@ -791,6 +791,17 @@ static const ARMCPRegInfo v6_cp_reginfo[] = {
     REGINFO_SENTINEL
 };
 
+extern int qsim_gen_callbacks;
+extern bool qsim_sys_callbacks;
+extern magic_cb_t qsim_magic_cb;
+extern uint64_t qsim_tpid;
+extern int qsim_id;
+extern uint64_t curr_tpid[64];
+
+extern qsim_ucontext_t main_context;
+extern qsim_ucontext_t qemu_context;
+
+
 static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
                                    bool isread)
 {
@@ -798,10 +809,13 @@ static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
      * by PMUSERENR. MDCR_EL2.TPM and MDCR_EL3.TPM allow configurable
      * trapping to EL2 or EL3 for other accesses.
      */
+
     int el = arm_current_el(env);
 
     if (el == 0 && !env->cp15.c9_pmuserenr) {
-        return CP_ACCESS_TRAP;
+        if (!qsim_magic_cb) {
+            return CP_ACCESS_TRAP;
+        }
     }
     if (el < 2 && (env->cp15.mdcr_el2 & MDCR_TPM)
         && !arm_is_secure_below_el3(env)) {
@@ -810,6 +824,7 @@ static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
     if (el < 3 && (env->cp15.mdcr_el3 & MDCR_TPM)) {
         return CP_ACCESS_TRAP_EL3;
     }
+
 
     return CP_ACCESS_OK;
 }
@@ -844,15 +859,7 @@ void pmccntr_sync(CPUARMState *env)
     }
 }
 
-extern int qsim_gen_callbacks;
-extern bool qsim_sys_callbacks;
-extern magic_cb_t qsim_magic_cb;
-extern uint64_t qsim_tpid;
-extern int qsim_id;
-extern uint64_t curr_tpid[64];
 
-extern qsim_ucontext_t main_context;
-extern qsim_ucontext_t qemu_context;
 
 static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                        uint64_t value)

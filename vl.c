@@ -4831,11 +4831,12 @@ int qsim_qemu_main(int argc, const char **argv, char **envp)
 
     os_setup_post();
 
-//    if (is_daemonized()) {
-//        if (!trace_init_backends(trace_events, trace_file)) {
-//            exit(1);
-//        }
-//  }
+    if (is_daemonized()) {
+        if (!trace_init_backends()) {
+            exit(1);
+        }
+    }
+
 //
 //        main_loop();
 //    replay_disable_events();
