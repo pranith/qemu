@@ -861,7 +861,7 @@ static void kick_tcg_thread(void *opaque)
 
 static void start_tcg_kick_timer(void)
 {
-    if (!mttcg_enabled && !tcg_kick_vcpu_timer && CPU_NEXT(first_cpu)) {
+    if (!tcg_kick_vcpu_timer && CPU_NEXT(first_cpu)) {
         tcg_kick_vcpu_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                            kick_tcg_thread, NULL);
         timer_mod(tcg_kick_vcpu_timer, qemu_tcg_next_kick());
@@ -1070,7 +1070,7 @@ static void qemu_wait_io_event_common(CPUState *cpu)
 
 static bool qemu_tcg_should_sleep(CPUState *cpu)
 {
-    if (mttcg_enabled) {
+    if (0 && mttcg_enabled) {
         return cpu_thread_is_idle(cpu);
     } else {
         return all_cpu_threads_idle();
@@ -1447,9 +1447,11 @@ static void CALLBACK dummy_apc_func(ULONG_PTR unused)
  * current CPUState for a given thread.
  */
 
+    
 static void *qemu_tcg_cpu_thread_fn(void *arg)
 {
-    CPUState *cpu = arg;
+    CPUState *thread_first_cpu = arg;
+    CPUState *cpu = thread_first_cpu;
 
     g_assert(!use_icount);
 
@@ -1468,41 +1470,55 @@ static void *qemu_tcg_cpu_thread_fn(void *arg)
     cpu->exit_request = 1;
 
     while (1) {
-        if (cpu_can_run(cpu)) {
-            int r;
-            r = tcg_cpu_exec(cpu);
-            switch (r) {
-            case EXCP_DEBUG:
-                cpu_handle_guest_debug(cpu);
-                break;
-            case EXCP_HALTED:
-                /* during start-up the vCPU is reset and the thread is
-                 * kicked several times. If we don't ensure we go back
-                 * to sleep in the halted state we won't cleanly
-                 * start-up when the vCPU is enabled.
-                 *
-                 * cpu->halted should ensure we sleep in wait_io_event
-                 */
-                g_assert(cpu->halted);
-                break;
-            case EXCP_ATOMIC:
-                qemu_mutex_unlock_iothread();
-                cpu_exec_step_atomic(cpu);
-                qemu_mutex_lock_iothread();
-            default:
-                /* Ignore everything else? */
-                break;
-            }
-        } else if (cpu->unplug) {
-            qemu_tcg_destroy_vcpu(cpu);
-            cpu->created = false;
-            qemu_cond_signal(&qemu_cpu_cond);
-            qemu_mutex_unlock_iothread();
-            return NULL;
+        if (!cpu) {
+            cpu = thread_first_cpu;
         }
 
-        atomic_mb_set(&cpu->exit_request, 0);
-        qemu_tcg_wait_io_event(cpu);
+        while (cpu && !cpu->queued_work_first && !cpu->exit_request) {
+            tcg_current_rr_cpu = cpu;
+            if (cpu_can_run(cpu)) {
+                int r;
+                r = tcg_cpu_exec(cpu);
+                switch (r) {
+                case EXCP_DEBUG:
+                    cpu_handle_guest_debug(cpu);
+                    break;
+                case EXCP_HALTED:
+                    /* during start-up the vCPU is reset and the thread is
+                     * kicked several times. If we don't ensure we go back
+                     * to sleep in the halted state we won't cleanly
+                     * start-up when the vCPU is enabled.
+                     *
+                     * cpu->halted should ensure we sleep in wait_io_event
+                     */
+                    g_assert(cpu->halted);
+                    break;
+                case EXCP_ATOMIC:
+                    qemu_mutex_unlock_iothread();
+                    cpu_exec_step_atomic(cpu);
+                    qemu_mutex_lock_iothread();
+                default:
+                    /* Ignore everything else? */
+                    break;
+                }
+            } else if (cpu->unplug) {
+                qemu_tcg_destroy_vcpu(cpu);
+                cpu->created = false;
+                qemu_cond_signal(&qemu_cpu_cond);
+            }
+
+            cpu = CPU_NEXT(cpu);
+
+            if (!cpu || cpu->cpu_index - thread_first_cpu->cpu_index > 8) {
+                cpu = thread_first_cpu;
+            }
+            qemu_tcg_wait_io_event(cpu);
+        }
+        tcg_current_rr_cpu = NULL;
+
+        if (cpu->exit_request) {
+            atomic_mb_set(&cpu->exit_request, 0);
+        }
     }
 
     return NULL;
@@ -1659,19 +1675,24 @@ void cpu_remove_sync(CPUState *cpu)
 /* For temporary buffers for forming a name */
 #define VCPU_THREAD_NAME_SIZE 16
 
+int num_threads = 8;
+
 static void qemu_tcg_init_vcpu(CPUState *cpu)
 {
     char thread_name[VCPU_THREAD_NAME_SIZE];
     static QemuCond *single_tcg_halt_cond;
     static QemuThread *single_tcg_cpu_thread;
 
-    if (qemu_tcg_mttcg_enabled() || !single_tcg_cpu_thread) {
+    start_tcg_kick_timer();
+
+    bool create_new_thread = qemu_tcg_mttcg_enabled() && (cpu->cpu_index % num_threads == 0);
+    if (create_new_thread || !single_tcg_cpu_thread) {
         cpu->thread = g_malloc0(sizeof(QemuThread));
         cpu->halt_cond = g_malloc0(sizeof(QemuCond));
         qemu_cond_init(cpu->halt_cond);
 
-        if (qemu_tcg_mttcg_enabled()) {
-            /* create a thread per vCPU with TCG (MTTCG) */
+        if (create_new_thread) {
+            /* create a thread per 'n' vCPU with TCG (MTTCG) */
             parallel_cpus = true;
             snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "CPU %d/TCG",
                  cpu->cpu_index);
@@ -1679,8 +1700,10 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
             qemu_thread_create(cpu->thread, thread_name, qemu_tcg_cpu_thread_fn,
                                cpu, QEMU_THREAD_JOINABLE);
 
+            single_tcg_halt_cond = cpu->halt_cond;
+            single_tcg_cpu_thread = cpu->thread;
         } else {
-            /* share a single thread for all cpus with TCG */
+            /* share a single thread for n cpus with TCG */
             snprintf(thread_name, VCPU_THREAD_NAME_SIZE, "ALL CPUs/TCG");
             qemu_thread_create(cpu->thread, thread_name,
                                qemu_tcg_rr_cpu_thread_fn,
@@ -1699,6 +1722,8 @@ static void qemu_tcg_init_vcpu(CPUState *cpu)
         /* For non-MTTCG cases we share the thread */
         cpu->thread = single_tcg_cpu_thread;
         cpu->halt_cond = single_tcg_halt_cond;
+        cpu->created = true;
+        cpu->can_do_io = 1;
     }
 }
 
