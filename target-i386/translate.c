@@ -2531,16 +2531,7 @@ gen_svm_check_intercept(DisasContext *s, target_ulong pc_start, uint64_t type)
 static inline void gen_stack_update(DisasContext *s, int addend)
 {
     qsim_set_inst_type(QSIM_INST_STACK);
-#ifdef TARGET_X86_64
-    if (CODE64(s)) {
-        gen_op_add_reg_im(MO_64, R_ESP, addend);
-    } else
-#endif
-    if (s->ss32) {
-        gen_op_add_reg_im(MO_32, R_ESP, addend);
-    } else {
-        gen_op_add_reg_im(MO_16, R_ESP, addend);
-    }
+    gen_op_add_reg_im(mo_stacksize(s), R_ESP, addend);
 }
 
 /* Generate a push. It depends on ss32, addseg and dflag.  */
@@ -2581,19 +2572,13 @@ static TCGMemOp gen_pop_T0(DisasContext *s)
 
 static inline void gen_pop_update(DisasContext *s, TCGMemOp ot)
 {
-    qsim_set_inst_type(QSIM_INST_STACK);
     gen_stack_update(s, 1 << ot);
 }
 
 static inline void gen_stack_A0(DisasContext *s)
 {
     qsim_set_inst_type(QSIM_INST_STACK);
-    gen_op_movl_A0_reg(R_ESP);
-    if (!s->ss32)
-        tcg_gen_ext16u_tl(cpu_A0, cpu_A0);
-    tcg_gen_mov_tl(cpu_T1, cpu_A0);
-    if (s->addseg)
-        gen_op_addl_A0_seg(s, R_SS);
+    gen_lea_v_seg(s, s->ss32 ? MO_32 : MO_16, cpu_regs[R_ESP], R_SS, -1);
 }
 
 static void gen_pusha(DisasContext *s)
@@ -2608,10 +2593,8 @@ static void gen_pusha(DisasContext *s)
         gen_lea_v_seg(s, s_ot, cpu_A0, R_SS, -1);
         gen_op_st_v(s, d_ot, cpu_regs[7 - i], cpu_A0);
     }
-    gen_op_mov_reg_v(MO_16 + s->ss32, R_ESP, cpu_T1);
-    qsim_set_inst_type(QSIM_INST_STACK);
 
-    //gen_stack_update(s, -8 * size);
+    gen_stack_update(s, -8 * size);
 }
 
 static void gen_popa(DisasContext *s)
@@ -2631,10 +2614,8 @@ static void gen_popa(DisasContext *s)
         gen_op_ld_v(s, d_ot, cpu_T0, cpu_A0);
         gen_op_mov_reg_v(d_ot, 7 - i, cpu_T0);
     }
-    gen_op_mov_reg_v(MO_16 + s->ss32, R_ESP, cpu_T1);
-    qsim_set_inst_type(QSIM_INST_STACK);
 
-    //gen_stack_update(s, 8 * size);
+    gen_stack_update(s, 8 * size);
 }
 
 static void gen_enter(DisasContext *s, int esp_addend, int level)

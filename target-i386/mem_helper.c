@@ -258,16 +258,16 @@ uint64_t get_reg(int cpu_idx, int r) {
         case QSIM_X86_R13:    return cpu->regs[13];
         case QSIM_X86_R14:    return cpu->regs[14];
         case QSIM_X86_R15:    return cpu->regs[15];
-        /*  TODO : GET IT TO WORK DON'T KNOW HOW
-        case QSIM_X86_FP0:    return cpu->fpregs[0].mmx._q_MMXReg;
-        case QSIM_X86_FP1:    return cpu->fpregs[1].mmx._q_MMXReg;
-        case QSIM_X86_FP2:    return cpu->fpregs[2].mmx._q_MMXReg;
-        case QSIM_X86_FP3:    return cpu->fpregs[3].mmx._q_MMXReg;
-        case QSIM_X86_FP4:    return cpu->fpregs[4].mmx._q_MMXReg;
-        case QSIM_X86_FP5:    return cpu->fpregs[5].mmx._q_MMXReg;
-        case QSIM_X86_FP6:    return cpu->fpregs[6].mmx._q_MMXReg;
-        case QSIM_X86_FP7:    return cpu->fpregs[7].mmx._q_MMXReg;
-        */
+        //  TODO : GET IT TO WORK DON'T KNOW HOW
+        case QSIM_X86_FP0:    return cpu->fpregs[0].mmx.MMX_Q(0);
+        case QSIM_X86_FP1:    return cpu->fpregs[1].mmx.MMX_Q(0);
+        case QSIM_X86_FP2:    return cpu->fpregs[2].mmx.MMX_Q(0);
+        case QSIM_X86_FP3:    return cpu->fpregs[3].mmx.MMX_Q(0);
+        case QSIM_X86_FP4:    return cpu->fpregs[4].mmx.MMX_Q(0);
+        case QSIM_X86_FP5:    return cpu->fpregs[5].mmx.MMX_Q(0);
+        case QSIM_X86_FP6:    return cpu->fpregs[6].mmx.MMX_Q(0);
+        case QSIM_X86_FP7:    return cpu->fpregs[7].mmx.MMX_Q(0);
+
         case QSIM_X86_CS :    return cpu->segs[R_CS].base;;
         case QSIM_X86_SS :    return cpu->segs[R_SS].base;;
         case QSIM_X86_CR0:    return cpu->cr[0];
@@ -322,12 +322,12 @@ uint64_t get_reg(int cpu_idx, int r) {
         */
         default       :   return 0xbadbadbadbadbadbULL;
     }
-} 
+}
 
 /*
 static inline void qsim_update_seg(int seg) {
     CPUX86State *cpu = (CPUX86State *)first_cpu;
-    cpu_x86_load_seg_cache(cpu, seg, 
+    cpu_x86_load_seg_cache(cpu, seg,
             cpu->segs[seg].selector,
             cpu->segs[seg].base,
             cpu->segs[seg].limit,
@@ -356,16 +356,15 @@ void set_reg(int c, int r, uint64_t val) {
         case QSIM_X86_R13:    cpu->regs[13]             = val;      break;
         case QSIM_X86_R14:    cpu->regs[14]             = val;      break;
         case QSIM_X86_R15:    cpu->regs[15]             = val;      break;
-        /*  TODO : GET IT TO WORK DON'T KNOW HOW
-        case QSIM_X86_FP0:    cpu->fpregs[0].mmx._q_MMXReg      = val;      break;
-        case QSIM_X86_FP1:    cpu->fpregs[1].mmx._q_MMXReg      = val;      break;
-        case QSIM_X86_FP2:    cpu->fpregs[2].mmx._q_MMXReg      = val;      break;
-        case QSIM_X86_FP3:    cpu->fpregs[3].mmx._q_MMXReg      = val;      break;
-        case QSIM_X86_FP4:    cpu->fpregs[4].mmx._q_MMXReg      = val;      break;
-        case QSIM_X86_FP5:    cpu->fpregs[5].mmx._q_MMXReg      = val;      break;
-        case QSIM_X86_FP6:    cpu->fpregs[6].mmx._q_MMXReg      = val;      break;
-        case QSIM_X86_FP7:    cpu->fpregs[7].mmx._q_MMXReg      = val;      break;
-        */
+        //TODO : GET IT TO WORK DON'T KNOW HOW
+        case QSIM_X86_FP0:    cpu->fpregs[0].mmx.MMX_Q(0)      = val;      break;
+        case QSIM_X86_FP1:    cpu->fpregs[1].mmx.MMX_Q(0)      = val;      break;
+        case QSIM_X86_FP2:    cpu->fpregs[2].mmx.MMX_Q(0)      = val;      break;
+        case QSIM_X86_FP3:    cpu->fpregs[3].mmx.MMX_Q(0)      = val;      break;
+        case QSIM_X86_FP4:    cpu->fpregs[4].mmx.MMX_Q(0)      = val;      break;
+        case QSIM_X86_FP5:    cpu->fpregs[5].mmx.MMX_Q(0)      = val;      break;
+        case QSIM_X86_FP6:    cpu->fpregs[6].mmx.MMX_Q(0)      = val;      break;
+        case QSIM_X86_FP7:    cpu->fpregs[7].mmx.MMX_Q(0)      = val;      break;
         /*
         case QSIM_X86_FPSP:   cpu->fpstt                = val;      break;
         case QSIM_X86_ES :    cpu->segs[R_ES ].selector = val;      break;
@@ -461,7 +460,7 @@ static uint8_t *get_host_vaddr(CPUX86State *env, uint64_t vaddr, uint32_t length
     /* Skip device I/O
      */
     if (memory_region_get_ram_addr(mr) != -1)
-        ptr = qemu_get_ram_ptr(memory_region_get_ram_addr(mr),addr1);
+        ptr = qemu_get_ram_ptr((RAMBlock *) memory_region_get_ram_addr(mr),addr1);
 
 done:
     return ptr;
@@ -549,7 +548,7 @@ void helper_store_callback_pre(CPUX86State *env, uint64_t vaddr,
     return;
 }
 
-void helper_load_callback_pre(CPUX86State *env, target_ulong vaddr, uint32_t size, uint32_t type) 
+void helper_load_callback_pre(CPUX86State *env, target_ulong vaddr, uint32_t size, uint32_t type)
 {
     memop_callback(env, vaddr, size, type);
 
