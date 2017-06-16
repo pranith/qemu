@@ -1343,7 +1343,7 @@ static uint8_t *get_host_vaddr(CPUARMState *env, uint64_t vaddr, uint32_t length
     /* Skip device I/O
      */
     if (memory_region_get_ram_addr(mr) != -1)
-        ptr = qemu_get_ram_ptr(memory_region_get_ram_addr(mr),addr1);
+        ptr = qemu_get_ram_ptr((RAMBlock *) memory_region_get_ram_addr(mr),addr1);
 
 done:
     return ptr;
