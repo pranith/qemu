@@ -470,8 +470,6 @@ bool timer_expired(QEMUTimer *timer_head, int64_t current_time)
     return timer_expired_ns(timer_head, current_time * timer_head->scale);
 }
 
-extern bool qsim_run_timers;
-
 bool timerlist_run_timers(QEMUTimerList *timer_list)
 {
     QEMUTimer *ts;
@@ -481,7 +479,7 @@ bool timerlist_run_timers(QEMUTimerList *timer_list)
     void *opaque;
 
     qemu_event_reset(&timer_list->timers_done_ev);
-    if (!qsim_run_timers || !timer_list->clock->enabled || !timer_list->active_timers) {
+    if (!timer_list->clock->enabled || !timer_list->active_timers) {
         goto out;
     }
 
@@ -651,8 +649,6 @@ bool qemu_clock_run_all_timers(void)
     for (type = 0; type < QEMU_CLOCK_MAX; type++) {
         progress |= qemu_clock_run_timers(type);
     }
-
-    qsim_run_timers = !progress;
 
     return progress;
 }
