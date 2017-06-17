@@ -185,12 +185,8 @@ struct CPUAddressSpace {
 uint8_t         qsim_irq_vec     = 0;
 int             qsim_irq_pending = 0;
 static pthread_mutex_t qsim_irq_lock    = PTHREAD_MUTEX_INITIALIZER;
-bool qsim_run_timers = true;
 
 int interrupt(uint8_t vec) {
-
-    qsim_run_timers = true;
-    //timermod
 
     return 0;
 
