@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 
+#include "qemu/osdep.h"
 #include "qemu/main-loop.h"
 #include "qemu/timer.h"
 #include "sysemu/replay.h"
@@ -128,7 +129,7 @@ static void qemu_clock_init(QEMUClockType type)
     assert(main_loop_tlg.tl[type] == NULL);
 
     clock->type = type;
-    clock->enabled = true;
+    clock->enabled = (type == QEMU_CLOCK_VIRTUAL ? false : true);
     clock->last = INT64_MIN;
     QLIST_INIT(&clock->timerlists);
     notifier_list_init(&clock->reset_notifiers);
@@ -393,7 +394,9 @@ static bool timer_mod_ns_locked(QEMUTimerList *timer_list,
 static void timerlist_rearm(QEMUTimerList *timer_list)
 {
     /* Interrupt execution to force deadline recalculation.  */
-    qemu_clock_warp(timer_list->clock->type);
+    if (timer_list->clock->type == QEMU_CLOCK_VIRTUAL) {
+        qemu_start_warp_timer();
+    }
     timerlist_notify(timer_list);
 }
 

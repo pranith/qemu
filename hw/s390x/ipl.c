@@ -11,6 +11,8 @@
  *
  */
 
+#include "qemu/osdep.h"
+#include "qapi/error.h"
 #include "sysemu/sysemu.h"
 #include "cpu.h"
 #include "elf.h"
@@ -45,8 +47,8 @@ static const VMStateDescription vmstate_ipl = {
     .version_id = 0,
     .minimum_version_id = 0,
     .fields = (VMStateField[]) {
-        VMSTATE_UINT64(start_addr, S390IPLState),
-        VMSTATE_UINT64(bios_start_addr, S390IPLState),
+        VMSTATE_UINT64(compat_start_addr, S390IPLState),
+        VMSTATE_UINT64(compat_bios_start_addr, S390IPLState),
         VMSTATE_STRUCT(iplb, S390IPLState, 0, vmstate_iplb, IplParameterBlock),
         VMSTATE_BOOL(iplb_valid, S390IPLState),
         VMSTATE_UINT8(cssid, S390IPLState),
@@ -76,7 +78,7 @@ static void s390_ipl_realize(DeviceState *dev, Error **errp)
     S390IPLState *ipl = S390_IPL(dev);
     uint64_t pentry = KERN_IMAGE_START;
     int kernel_size;
-    Error *l_err = NULL;
+    Error *err = NULL;
 
     int bios_size;
     char *bios_filename;
@@ -94,18 +96,18 @@ static void s390_ipl_realize(DeviceState *dev, Error **errp)
 
         bios_filename = qemu_find_file(QEMU_FILE_TYPE_BIOS, bios_name);
         if (bios_filename == NULL) {
-            error_setg(&l_err, "could not find stage1 bootloader\n");
+            error_setg(&err, "could not find stage1 bootloader");
             goto error;
         }
 
         bios_size = load_elf(bios_filename, bios_translate_addr, &fwbase,
                              &ipl->bios_start_addr, NULL, NULL, 1,
-                             EM_S390, 0);
+                             EM_S390, 0, 0);
         if (bios_size > 0) {
             /* Adjust ELF start address to final location */
             ipl->bios_start_addr += fwbase;
         } else {
-            /* Try to load non-ELF file (e.g. s390-zipl.rom) */
+            /* Try to load non-ELF file (e.g. s390-ccw.img) */
             bios_size = load_image_targphys(bios_filename, ZIPL_IMAGE_START,
                                             4096);
             ipl->bios_start_addr = ZIPL_IMAGE_START;
@@ -113,7 +115,7 @@ static void s390_ipl_realize(DeviceState *dev, Error **errp)
         g_free(bios_filename);
 
         if (bios_size == -1) {
-            error_setg(&l_err, "could not load bootloader '%s'\n", bios_name);
+            error_setg(&err, "could not load bootloader '%s'", bios_name);
             goto error;
         }
 
@@ -123,12 +125,12 @@ static void s390_ipl_realize(DeviceState *dev, Error **errp)
 
     if (ipl->kernel) {
         kernel_size = load_elf(ipl->kernel, NULL, NULL, &pentry, NULL,
-                               NULL, 1, EM_S390, 0);
+                               NULL, 1, EM_S390, 0, 0);
         if (kernel_size < 0) {
             kernel_size = load_image_targphys(ipl->kernel, 0, ram_size);
         }
         if (kernel_size < 0) {
-            error_setg(&l_err, "could not load kernel '%s'\n", ipl->kernel);
+            error_setg(&err, "could not load kernel '%s'", ipl->kernel);
             goto error;
         }
         /*
@@ -156,7 +158,7 @@ static void s390_ipl_realize(DeviceState *dev, Error **errp)
             initrd_size = load_image_targphys(ipl->initrd, initrd_offset,
                                               ram_size - initrd_offset);
             if (initrd_size == -1) {
-                error_setg(&l_err, "could not load initrd '%s'\n", ipl->initrd);
+                error_setg(&err, "could not load initrd '%s'", ipl->initrd);
                 goto error;
             }
 
@@ -168,9 +170,16 @@ static void s390_ipl_realize(DeviceState *dev, Error **errp)
             stq_p(rom_ptr(INITRD_PARM_SIZE), initrd_size);
         }
     }
+    /*
+     * Don't ever use the migrated values, they could come from a different
+     * BIOS and therefore don't work. But still migrate the values, so
+     * QEMUs relying on it don't break.
+     */
+    ipl->compat_start_addr = ipl->start_addr;
+    ipl->compat_bios_start_addr = ipl->bios_start_addr;
     qemu_register_reset(qdev_reset_all_fn, dev);
 error:
-    error_propagate(errp, l_err);
+    error_propagate(errp, err);
 }
 
 static Property s390_ipl_properties[] = {

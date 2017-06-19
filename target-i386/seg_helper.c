@@ -18,10 +18,12 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "qemu/osdep.h"
 #include "cpu.h"
 #include "qemu/log.h"
 #include "exec/helper-proto.h"
 #include "exec/cpu_ldst.h"
+#include "exec/log.h"
 
 //#define DEBUG_PCALL
 
@@ -81,8 +83,6 @@ static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
                                uint32_t *e2_ptr, int selector,
                                uintptr_t retaddr)
 {
-    int rval;
-
     SegmentCache *dt;
     int index;
     target_ulong ptr;
@@ -94,17 +94,12 @@ static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
     }
     index = selector & ~7;
     if ((index + 7) > dt->limit) {
-        rval = -1;
-        goto ls_end;
+        return -1;
     }
     ptr = dt->base + index;
     *e1_ptr = cpu_ldl_kernel_ra(env, ptr, retaddr);
     *e2_ptr = cpu_ldl_kernel_ra(env, ptr + 4, retaddr);
-
-    rval = 0;
-
-ls_end:
-    return rval;
+    return 0;
 }
 
 static inline int load_segment(CPUX86State *env, uint32_t *e1_ptr,
@@ -1407,80 +1402,6 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
 
     return ret;
 }
-
-void helper_enter_level(CPUX86State *env, int level, int data32,
-                        target_ulong t1)
-{
-    target_ulong ssp;
-    uint32_t esp_mask, esp, ebp;
-
-    esp_mask = get_sp_mask(env->segs[R_SS].flags);
-    ssp = env->segs[R_SS].base;
-    ebp = env->regs[R_EBP];
-    esp = env->regs[R_ESP];
-    if (data32) {
-        /* 32 bit */
-        esp -= 4;
-        while (--level) {
-            esp -= 4;
-            ebp -= 4;
-            cpu_stl_data_ra(env, ssp + (esp & esp_mask),
-                            cpu_ldl_data_ra(env, ssp + (ebp & esp_mask),
-                                            GETPC()),
-                            GETPC());
-        }
-        esp -= 4;
-        cpu_stl_data_ra(env, ssp + (esp & esp_mask), t1, GETPC());
-    } else {
-        /* 16 bit */
-        esp -= 2;
-        while (--level) {
-            esp -= 2;
-            ebp -= 2;
-            cpu_stw_data_ra(env, ssp + (esp & esp_mask),
-                            cpu_lduw_data_ra(env, ssp + (ebp & esp_mask),
-                                             GETPC()),
-                            GETPC());
-        }
-        esp -= 2;
-        cpu_stw_data_ra(env, ssp + (esp & esp_mask), t1, GETPC());
-    }
-}
-
-#ifdef TARGET_X86_64
-void helper_enter64_level(CPUX86State *env, int level, int data64,
-                          target_ulong t1)
-{
-    target_ulong esp, ebp;
-
-    ebp = env->regs[R_EBP];
-    esp = env->regs[R_ESP];
-
-    if (data64) {
-        /* 64 bit */
-        esp -= 8;
-        while (--level) {
-            esp -= 8;
-            ebp -= 8;
-            cpu_stq_data_ra(env, esp, cpu_ldq_data_ra(env, ebp, GETPC()),
-                            GETPC());
-        }
-        esp -= 8;
-        cpu_stq_data_ra(env, esp, t1, GETPC());
-    } else {
-        /* 16 bit */
-        esp -= 2;
-        while (--level) {
-            esp -= 2;
-            ebp -= 2;
-            cpu_stw_data_ra(env, esp, cpu_lduw_data_ra(env, ebp, GETPC()),
-                            GETPC());
-        }
-        esp -= 2;
-        cpu_stw_data_ra(env, esp, t1, GETPC());
-    }
-}
-#endif
 
 void helper_lldt(CPUX86State *env, int selector)
 {

@@ -8,6 +8,7 @@
  * (at your option) any later version. See the COPYING file in the
  * top-level directory.
  */
+#include "qemu/osdep.h"
 #include "sysemu/sysemu.h"
 #include "sysemu/cpus.h"
 #include "sysemu/kvm.h"
@@ -393,7 +394,7 @@ static void patch_instruction(VAPICROMState *s, X86CPU *cpu, target_ulong ip)
     CPUX86State *env = &cpu->env;
     VAPICHandlers *handlers;
     uint8_t opcode[2];
-    uint32_t imm32;
+    uint32_t imm32 = 0;
     target_ulong current_pc = 0;
     target_ulong current_cs_base = 0;
     int current_flags = 0;
