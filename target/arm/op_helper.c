@@ -1420,3 +1420,19 @@ uint32_t HELPER(ror_cc)(CPUARMState *env, uint32_t x, uint32_t i)
         return ((uint32_t)x >> shift) | (x << (32 - shift));
     }
 }
+
+void HELPER(load_pre)(CPUARMState *env)
+{
+}
+
+void HELPER(load_post)(CPUARMState *env)
+{
+}
+
+void HELPER(store_pre)(CPUARMState *env)
+{
+}
+
+void HELPER(store_post)(CPUARMState *env)
+{
+}

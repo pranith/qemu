@@ -83,6 +83,20 @@ typedef void NeonGenOneOpFn(TCGv_i64, TCGv_i64);
 typedef void CryptoTwoOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32);
 typedef void CryptoThreeOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32, TCGv_i32);
 
+static void tcg_wrap_qemu_ld_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+{
+    gen_helper_load_pre(tcg_ctx.tcg_env);
+    tcg_gen_qemu_ld_i64(val, addr, idx, memop);
+    gen_helper_load_post(tcg_ctx.tcg_env);
+}
+
+static void tcg_wrap_qemu_st_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
+{
+    gen_helper_store_pre(tcg_ctx.tcg_env);
+    tcg_gen_qemu_st_i64(val, addr, idx, memop);
+    gen_helper_store_post(tcg_ctx.tcg_env);
+}
+
 /* initialize TCG globals.  */
 void a64_translate_init(void)
 {
@@ -807,7 +821,7 @@ static void do_gpr_st_memidx(DisasContext *s, TCGv_i64 source,
                              bool iss_sf, bool iss_ar)
 {
     g_assert(size <= 3);
-    tcg_gen_qemu_st_i64(source, tcg_addr, memidx, s->be_data + size);
+    tcg_wrap_qemu_st_i64(source, tcg_addr, memidx, s->be_data + size);
 
     if (iss_valid) {
         uint32_t syn;
@@ -851,7 +865,7 @@ static void do_gpr_ld_memidx(DisasContext *s,
         memop += MO_SIGN;
     }
 
-    tcg_gen_qemu_ld_i64(dest, tcg_addr, memidx, memop);
+    tcg_wrap_qemu_ld_i64(dest, tcg_addr, memidx, memop);
 
     if (extend && is_signed) {
         g_assert(size < 3);
@@ -892,17 +906,17 @@ static void do_fp_st(DisasContext *s, int srcidx, TCGv_i64 tcg_addr, int size)
     TCGv_i64 tmp = tcg_temp_new_i64();
     tcg_gen_ld_i64(tmp, cpu_env, fp_reg_offset(s, srcidx, MO_64));
     if (size < 4) {
-        tcg_gen_qemu_st_i64(tmp, tcg_addr, get_mem_index(s),
+        tcg_wrap_qemu_st_i64(tmp, tcg_addr, get_mem_index(s),
                             s->be_data + size);
     } else {
         bool be = s->be_data == MO_BE;
         TCGv_i64 tcg_hiaddr = tcg_temp_new_i64();
 
         tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
-        tcg_gen_qemu_st_i64(tmp, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
+        tcg_wrap_qemu_st_i64(tmp, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
                             s->be_data | MO_Q);
         tcg_gen_ld_i64(tmp, cpu_env, fp_reg_hi_offset(s, srcidx));
-        tcg_gen_qemu_st_i64(tmp, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
+        tcg_wrap_qemu_st_i64(tmp, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
                             s->be_data | MO_Q);
         tcg_temp_free_i64(tcg_hiaddr);
     }
@@ -922,7 +936,7 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
     if (size < 4) {
         TCGMemOp memop = s->be_data + size;
         tmphi = tcg_const_i64(0);
-        tcg_gen_qemu_ld_i64(tmplo, tcg_addr, get_mem_index(s), memop);
+        tcg_wrap_qemu_ld_i64(tmplo, tcg_addr, get_mem_index(s), memop);
     } else {
         bool be = s->be_data == MO_BE;
         TCGv_i64 tcg_hiaddr;
@@ -931,9 +945,9 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
         tcg_hiaddr = tcg_temp_new_i64();
 
         tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
-        tcg_gen_qemu_ld_i64(tmplo, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
+        tcg_wrap_qemu_ld_i64(tmplo, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
                             s->be_data | MO_Q);
-        tcg_gen_qemu_ld_i64(tmphi, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
+        tcg_wrap_qemu_ld_i64(tmphi, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
                             s->be_data | MO_Q);
         tcg_temp_free_i64(tcg_hiaddr);
     }
@@ -1077,7 +1091,7 @@ static void do_vec_st(DisasContext *s, int srcidx, int element,
     TCGv_i64 tcg_tmp = tcg_temp_new_i64();
 
     read_vec_element(s, tcg_tmp, srcidx, element, size);
-    tcg_gen_qemu_st_i64(tcg_tmp, tcg_addr, get_mem_index(s), memop);
+    tcg_wrap_qemu_st_i64(tcg_tmp, tcg_addr, get_mem_index(s), memop);
 
     tcg_temp_free_i64(tcg_tmp);
 }
@@ -1089,7 +1103,7 @@ static void do_vec_ld(DisasContext *s, int destidx, int element,
     TCGMemOp memop = s->be_data + size;
     TCGv_i64 tcg_tmp = tcg_temp_new_i64();
 
-    tcg_gen_qemu_ld_i64(tcg_tmp, tcg_addr, get_mem_index(s), memop);
+    tcg_wrap_qemu_ld_i64(tcg_tmp, tcg_addr, get_mem_index(s), memop);
     write_vec_element(s, tcg_tmp, destidx, element, size);
 
     tcg_temp_free_i64(tcg_tmp);
@@ -1856,7 +1870,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
     TCGMemOp memop = s->be_data + size;
 
     g_assert(size <= 3);
-    tcg_gen_qemu_ld_i64(tmp, addr, get_mem_index(s), memop);
+    tcg_wrap_qemu_ld_i64(tmp, addr, get_mem_index(s), memop);
 
     if (is_pair) {
         TCGv_i64 addr2 = tcg_temp_new_i64();
@@ -1864,7 +1878,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 
         g_assert(size >= 2);
         tcg_gen_addi_i64(addr2, addr, 1 << size);
-        tcg_gen_qemu_ld_i64(hitmp, addr2, get_mem_index(s), memop);
+        tcg_wrap_qemu_ld_i64(hitmp, addr2, get_mem_index(s), memop);
         tcg_temp_free_i64(addr2);
         tcg_gen_mov_i64(cpu_exclusive_high, hitmp);
         tcg_gen_mov_i64(cpu_reg(s, rt2), hitmp);
@@ -2797,7 +2811,7 @@ static void disas_ldst_single_struct(DisasContext *s, uint32_t insn)
             uint64_t mulconst;
             TCGv_i64 tcg_tmp = tcg_temp_new_i64();
 
-            tcg_gen_qemu_ld_i64(tcg_tmp, tcg_addr,
+            tcg_wrap_qemu_ld_i64(tcg_tmp, tcg_addr,
                                 get_mem_index(s), s->be_data + scale);
             switch (scale) {
             case 0:
