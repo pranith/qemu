@@ -31,6 +31,7 @@
 
 #include "exec/helper-proto.h"
 #include "exec/helper-gen.h"
+#include "exec/log.h"
 
 #include "trace-tcg.h"
 
@@ -796,9 +797,8 @@ static void do_gpr_st(DisasContext *s, TCGv_i64 source,
 static void do_gpr_ld_memidx(DisasContext *s, TCGv_i64 dest, TCGv_i64 tcg_addr,
                              int size, bool is_signed, bool extend, int memidx)
 {
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
     TCGMemOp memop = s->be_data + size;
-    TCGv_i32 tmp_size, tmp_type;
-    TCGMemOp memop = MO_TE + size;
 
     g_assert(size <= 3);
 
@@ -849,15 +849,19 @@ static void do_fp_st(DisasContext *s, int srcidx, TCGv_i64 tcg_addr, int size)
 
     tcg_gen_ld_i64(tmp, cpu_env, fp_reg_offset(s, srcidx, MO_64));
     if (size < 4) {
-        tcg_gen_qemu_st_i64(tmp, tcg_addr, get_mem_index(s), MO_TE + size);
+        tcg_gen_qemu_st_i64(tmp, tcg_addr, get_mem_index(s),
+                            s->be_data + size);
 
         if (qsim_gen_callbacks)
             gen_helper_store_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
 
     } else {
+        bool be = s->be_data == MO_BE;
         TCGv_i64 tcg_hiaddr = tcg_temp_new_i64();
 
-        tcg_gen_qemu_st_i64(tmp, tcg_addr, get_mem_index(s), MO_TEQ);
+        tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
+        tcg_gen_qemu_st_i64(tmp, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
+                            s->be_data | MO_Q);
 
         if (qsim_gen_callbacks)
             gen_helper_store_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
@@ -869,6 +873,8 @@ static void do_fp_st(DisasContext *s, int srcidx, TCGv_i64 tcg_addr, int size)
         if (qsim_gen_callbacks)
             gen_helper_store_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
 
+        tcg_gen_qemu_st_i64(tmp, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
+                            s->be_data | MO_Q);
         tcg_temp_free_i64(tcg_hiaddr);
     }
 
@@ -896,7 +902,7 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
     }
 
     if (size < 4) {
-        TCGMemOp memop = MO_TE + size;
+        TCGMemOp memop = s->be_data + size;
         tmphi = tcg_const_i64(0);
 
         if (qsim_gen_callbacks)
@@ -904,20 +910,22 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
 
         tcg_gen_qemu_ld_i64(tmplo, tcg_addr, get_mem_index(s), memop);
     } else {
+        bool be = s->be_data == MO_BE;
         TCGv_i64 tcg_hiaddr;
+
         tmphi = tcg_temp_new_i64();
         tcg_hiaddr = tcg_temp_new_i64();
 
         if (qsim_gen_callbacks)
             gen_helper_load_callback_pre(cpu_env, tcg_addr, tmp_size, tmp_type);
-
-        tcg_gen_qemu_ld_i64(tmplo, tcg_addr, get_mem_index(s), MO_TEQ);
         tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
-
+        tcg_gen_qemu_ld_i64(tmplo, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
+                            s->be_data | MO_Q);
         if (qsim_gen_callbacks)
             gen_helper_load_callback_pre(cpu_env, tcg_hiaddr, tmp_size, tmp_type);
 
-        tcg_gen_qemu_ld_i64(tmphi, tcg_hiaddr, get_mem_index(s), MO_TEQ);
+        tcg_gen_qemu_ld_i64(tmphi, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
+                            s->be_data | MO_Q);
         tcg_temp_free_i64(tcg_hiaddr);
     }
 
@@ -1061,7 +1069,7 @@ static void clear_vec_high(DisasContext *s, int rd)
 static void do_vec_st(DisasContext *s, int srcidx, int element,
                       TCGv_i64 tcg_addr, int size)
 {
-    TCGMemOp memop = MO_TE + size;
+    TCGMemOp memop = s->be_data + size;
     TCGv_i64 tcg_tmp = tcg_temp_new_i64();
 
     read_vec_element(s, tcg_tmp, srcidx, element, size);
@@ -1074,7 +1082,7 @@ static void do_vec_st(DisasContext *s, int srcidx, int element,
 static void do_vec_ld(DisasContext *s, int destidx, int element,
                       TCGv_i64 tcg_addr, int size)
 {
-    TCGMemOp memop = MO_TE + size;
+    TCGMemOp memop = s->be_data + size;
     TCGv_i64 tcg_tmp = tcg_temp_new_i64();
 
     tcg_gen_qemu_ld_i64(tcg_tmp, tcg_addr, get_mem_index(s), memop);
@@ -1486,16 +1494,18 @@ static void handle_sys(DisasContext *s, uint32_t insn, bool isread,
          * runtime; this may result in an exception.
          */
         TCGv_ptr tmpptr;
-        TCGv_i32 tcg_syn;
+        TCGv_i32 tcg_syn, tcg_isread;
         uint32_t syndrome;
 
         gen_a64_set_pc_im(s->pc - 4);
         tmpptr = tcg_const_ptr(ri);
         syndrome = syn_aa64_sysregtrap(op0, op1, op2, crn, crm, rt, isread);
         tcg_syn = tcg_const_i32(syndrome);
-        gen_helper_access_check_cp_reg(cpu_env, tmpptr, tcg_syn);
+        tcg_isread = tcg_const_i32(isread);
+        gen_helper_access_check_cp_reg(cpu_env, tmpptr, tcg_syn, tcg_isread);
         tcg_temp_free_ptr(tmpptr);
         tcg_temp_free_i32(tcg_syn);
+        tcg_temp_free_i32(tcg_isread);
     }
 
     /* Handle special cases first */
@@ -1819,7 +1829,7 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
                                TCGv_i64 addr, int size, bool is_pair)
 {
     TCGv_i64 tmp = tcg_temp_new_i64();
-    TCGMemOp memop = MO_TE + size;
+    TCGMemOp memop = s->be_data + size;
     TCGv_i32 tmp_size = 0;
     TCGv_i32 tmp_type = 0;
 
@@ -1844,7 +1854,6 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
             gen_helper_load_callback_pre(cpu_env, addr2, tmp_size, tmp_type);
 
         tcg_gen_qemu_ld_i64(hitmp, addr2, get_mem_index(s), memop);
-
         tcg_temp_free_i64(addr2);
         tcg_gen_mov_i64(cpu_exclusive_high, hitmp);
         tcg_gen_mov_i64(cpu_reg(s, rt2), hitmp);
@@ -1902,7 +1911,7 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     tcg_gen_brcond_i64(TCG_COND_NE, addr, cpu_exclusive_addr, fail_label);
 
     tmp = tcg_temp_new_i64();
-    tcg_gen_qemu_ld_i64(tmp, addr, get_mem_index(s), MO_TE + size);
+    tcg_gen_qemu_ld_i64(tmp, addr, get_mem_index(s), s->be_data + size);
     tcg_gen_brcond_i64(TCG_COND_NE, tmp, cpu_exclusive_val, fail_label);
     tcg_temp_free_i64(tmp);
 
@@ -1911,7 +1920,8 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
         TCGv_i64 tmphi = tcg_temp_new_i64();
 
         tcg_gen_addi_i64(addrhi, addr, 1 << size);
-        tcg_gen_qemu_ld_i64(tmphi, addrhi, get_mem_index(s), MO_TE + size);
+        tcg_gen_qemu_ld_i64(tmphi, addrhi, get_mem_index(s),
+                            s->be_data + size);
         tcg_gen_brcond_i64(TCG_COND_NE, tmphi, cpu_exclusive_high, fail_label);
 
         tcg_temp_free_i64(tmphi);
@@ -1919,7 +1929,8 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     }
 
     /* We seem to still have the exclusive monitor, so do the store */
-    tcg_gen_qemu_st_i64(cpu_reg(s, rt), addr, get_mem_index(s), MO_TE + size);
+    tcg_gen_qemu_st_i64(cpu_reg(s, rt), addr, get_mem_index(s),
+                        s->be_data + size);
 
     if (qsim_gen_callbacks) {
         tmp_size = tcg_const_i32(1 << (size & MO_SIZE));
@@ -1932,7 +1943,7 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
 
         tcg_gen_addi_i64(addrhi, addr, 1 << size);
         tcg_gen_qemu_st_i64(cpu_reg(s, rt2), addrhi,
-                            get_mem_index(s), MO_TE + size);
+                            get_mem_index(s), s->be_data + size);
 
         if (qsim_gen_callbacks)
             gen_helper_store_callback_post(cpu_env, addrhi, tmp_size, tmp_type);
@@ -2758,7 +2769,7 @@ static void disas_ldst_single_struct(DisasContext *s, uint32_t insn)
             TCGv_i64 tcg_tmp = tcg_temp_new_i64();
 
             tcg_gen_qemu_ld_i64(tcg_tmp, tcg_addr,
-                                get_mem_index(s), MO_TE + scale);
+                                get_mem_index(s), s->be_data + scale);
             switch (scale) {
             case 0:
                 mulconst = 0x0101010101010101ULL;
@@ -2788,9 +2799,9 @@ static void disas_ldst_single_struct(DisasContext *s, uint32_t insn)
         } else {
             /* Load/store one element per register */
             if (is_load) {
-                do_vec_ld(s, rt, index, tcg_addr, MO_TE + scale);
+                do_vec_ld(s, rt, index, tcg_addr, s->be_data + scale);
             } else {
-                do_vec_st(s, rt, index, tcg_addr, MO_TE + scale);
+                do_vec_st(s, rt, index, tcg_addr, s->be_data + scale);
             }
         }
         tcg_gen_addi_i64(tcg_addr, tcg_addr, ebytes);
@@ -11130,7 +11141,7 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
     TCGv_i32 tmp_size, tmp_type;
     TCGv_i64 tmp_insn;
 
-    insn = arm_ldl_code(env, s->pc, s->bswap_code);
+    insn = arm_ldl_code(env, s->pc, s->sctlr_b);
     s->insn = insn;
 
     // hack to encode the instruction type and arg length
@@ -11149,7 +11160,6 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
         gen_helper_qsim_callback();
     }
     s->pc += 4;
-
 
     s->fp_access_checked = false;
 
@@ -11216,7 +11226,8 @@ void gen_intermediate_code_a64(ARMCPU *cpu, TranslationBlock *tb)
     dc->secure_routed_to_el3 = arm_feature(env, ARM_FEATURE_EL3) &&
                                !arm_el_is_aa64(env, 3);
     dc->thumb = 0;
-    dc->bswap_code = 0;
+    dc->sctlr_b = 0;
+    dc->be_data = ARM_TBFLAG_BE_DATA(tb->flags) ? MO_BE : MO_LE;
     dc->condexec_mask = 0;
     dc->condexec_cond = 0;
     dc->mmu_idx = ARM_TBFLAG_MMUIDX(tb->flags);
@@ -11398,11 +11409,12 @@ done_generating:
     gen_tb_end(tb, num_insns);
 
 #ifdef DEBUG_DISAS
-    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)) {
+    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM) &&
+        qemu_log_in_addr_range(pc_start)) {
         qemu_log("----------------\n");
         qemu_log("IN: %s\n", lookup_symbol(pc_start));
         log_target_disas(cs, pc_start, dc->pc - pc_start,
-                         4 | (dc->bswap_code << 1));
+                         4 | (bswap_code(dc->sctlr_b) ? 2 : 0));
         qemu_log("\n");
     }
 #endif
