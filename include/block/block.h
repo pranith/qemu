@@ -203,12 +203,6 @@ int bdrv_create(BlockDriver *drv, const char* filename,
 int bdrv_create_file(const char *filename, QemuOpts *opts, Error **errp);
 BlockDriverState *bdrv_new_root(void);
 BlockDriverState *bdrv_new(void);
-<<<<<<< 529d45e151d82a772cd9b9af64bb25f88fba6567
-=======
-void bdrv_device_remove(BlockDriverState *bs);
-void bdrv_make_anon(BlockDriverState *bs);
-void bdrv_swap(BlockDriverState *bs_new, BlockDriverState *bs_old);
->>>>>>> block: set device_list.tqe_prev to NULL on BDS removal
 void bdrv_append(BlockDriverState *bs_new, BlockDriverState *bs_top);
 void bdrv_replace_in_backing_chain(BlockDriverState *old,
                                    BlockDriverState *new);

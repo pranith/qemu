@@ -1529,7 +1529,8 @@ static void tcg_exec_one(void)
     int r;
 
     /* Account partial waits to QEMU_CLOCK_VIRTUAL.  */
-    qemu_clock_warp(QEMU_CLOCK_VIRTUAL);
+    //qemu_clock_warp(QEMU_CLOCK_VIRTUAL);
+    qemu_start_warp_timer();
 
     for (next_cpu = first_cpu; next_cpu != NULL ; next_cpu = CPU_NEXT(next_cpu)) {
         if (next_cpu->cpu_index == qsim_id)
