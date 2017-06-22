@@ -83,8 +83,6 @@ static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
                                uint32_t *e2_ptr, int selector,
                                uintptr_t retaddr)
 {
-    int rval;
-
     SegmentCache *dt;
     int index;
     target_ulong ptr;
@@ -96,17 +94,12 @@ static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
     }
     index = selector & ~7;
     if ((index + 7) > dt->limit) {
-        rval = -1;
-        goto ls_end;
+        return -1;
     }
     ptr = dt->base + index;
     *e1_ptr = cpu_ldl_kernel_ra(env, ptr, retaddr);
     *e2_ptr = cpu_ldl_kernel_ra(env, ptr + 4, retaddr);
-
-    rval = 0;
-
-ls_end:
-    return rval;
+    return 0;
 }
 
 static inline int load_segment(CPUX86State *env, uint32_t *e1_ptr,
