@@ -1318,7 +1318,6 @@ uint32_t HELPER(ror_cc)(CPUARMState *env, uint32_t x, uint32_t i)
     }
 }
 
-extern void *qemu_get_ram_ptr(ram_addr_t addr);
 
 static uint8_t *get_host_vaddr(CPUARMState *env, uint64_t vaddr, uint32_t length)
 {
@@ -1343,8 +1342,8 @@ static uint8_t *get_host_vaddr(CPUARMState *env, uint64_t vaddr, uint32_t length
 
     /* Skip device I/O
      */
-    if (mr->ram_addr != -1)
-        ptr = qemu_get_ram_ptr(mr->ram_addr + addr1);
+    if (memory_region_get_ram_addr(mr) != -1)
+        ptr = qemu_get_ram_ptr((RAMBlock *) memory_region_get_ram_addr(mr),addr1);
 
 done:
     return ptr;
