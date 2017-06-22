@@ -615,11 +615,14 @@ static uint32_t apic_get_current_count(APICCommonState *s)
 
 static void apic_timer_update(APICCommonState *s, int64_t current_time)
 {
+
     if (apic_next_timer(s, current_time)) {
         timer_mod(s->timer, s->next_time);
     } else {
         timer_del(s->timer);
     }
+
+    return;
 }
 
 static void apic_timer(void *opaque)

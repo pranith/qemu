@@ -10,9 +10,12 @@
 #include "qemu/crc32c.h"
 #include "exec/cpu_ldst.h"
 #include "arm_ldst.h"
+#include "qsim-vm.h"
 #include <zlib.h> /* For crc32 */
 #include "exec/semihost.h"
 #include "sysemu/kvm.h"
+
+#include "qsim-context.h"
 
 #define ARM_CPU_FREQ 1000000000 /* FIXME: 1 GHz, should be configurable */
 
@@ -788,6 +791,17 @@ static const ARMCPRegInfo v6_cp_reginfo[] = {
     REGINFO_SENTINEL
 };
 
+extern int qsim_gen_callbacks;
+extern bool qsim_sys_callbacks;
+extern magic_cb_t qsim_magic_cb;
+extern uint64_t qsim_tpid;
+extern int qsim_id;
+extern uint64_t curr_tpid[64];
+
+extern qsim_ucontext_t main_context;
+extern qsim_ucontext_t qemu_context;
+
+
 static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
                                    bool isread)
 {
@@ -795,10 +809,13 @@ static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
      * by PMUSERENR. MDCR_EL2.TPM and MDCR_EL3.TPM allow configurable
      * trapping to EL2 or EL3 for other accesses.
      */
+
     int el = arm_current_el(env);
 
     if (el == 0 && !env->cp15.c9_pmuserenr) {
-        return CP_ACCESS_TRAP;
+        if (!qsim_magic_cb) {
+            return CP_ACCESS_TRAP;
+        }
     }
     if (el < 2 && (env->cp15.mdcr_el2 & MDCR_TPM)
         && !arm_is_secure_below_el3(env)) {
@@ -807,6 +824,7 @@ static CPAccessResult pmreg_access(CPUARMState *env, const ARMCPRegInfo *ri,
     if (el < 3 && (env->cp15.mdcr_el3 & MDCR_TPM)) {
         return CP_ACCESS_TRAP_EL3;
     }
+
 
     return CP_ACCESS_OK;
 }
@@ -841,9 +859,55 @@ void pmccntr_sync(CPUARMState *env)
     }
 }
 
+
+
 static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                        uint64_t value)
 {
+    ARMCPU *cpu = arm_env_get_cpu(env);
+    CPUState *cs = CPU(cpu);
+    int cpu_id = cs->cpu_index;
+
+    qsim_id = cs->cpu_index;
+    if (value == 0xaaaaaaaa) { // start
+        qsim_tpid = extract64(env->cp15.contextidr_el[1], 0, 32);
+
+        if (!qsim_gen_callbacks) {
+            tb_flush(cs);
+            printf("Enabling callback generation ");
+            if (qsim_sys_callbacks)
+                printf("systemwide.\n");
+            else
+                printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, qsim_id);
+
+            // Call magic cb the first time
+            if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+                qsim_swap_ctx();
+            }
+        }
+        qsim_gen_callbacks++;
+    } else if (value == 0xfa11dead) {
+      qsim_gen_callbacks--;
+
+      if (!qsim_gen_callbacks) {
+          qsim_tpid = -1;
+          tb_flush(cs);
+          printf("Disabling callback generation\n");
+
+          // Call magic cb the last time
+          if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+              qsim_swap_ctx();
+          }
+      }
+    } else if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+        qsim_swap_ctx();
+    }
+
+    if ((value & 0xffff0000) == 0xc75c0000) {
+        // context switch
+        curr_tpid[cpu_id] = value & 0xffff;
+    }
+
     pmccntr_sync(env);
 
     if (value & PMCRC) {
@@ -895,6 +959,7 @@ static void pmccntr_write(CPUARMState *env, const ARMCPRegInfo *ri,
         /* Increment once every 64 processor clock cycles */
         total_ticks /= 64;
     }
+
     env->cp15.c15_ccnt = total_ticks - value;
 }
 

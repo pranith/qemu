@@ -537,6 +537,17 @@ DEF_HELPER_2(dc_zva, void, env, i64)
 DEF_HELPER_FLAGS_2(neon_pmull_64_lo, TCG_CALL_NO_RWG_SE, i64, i64, i64)
 DEF_HELPER_FLAGS_2(neon_pmull_64_hi, TCG_CALL_NO_RWG_SE, i64, i64, i64)
 
+// qsim callback declarations
+DEF_HELPER_4(inst_callback, void, env, i64, i32, i32)
+DEF_HELPER_3(reg_read_callback, void, env, i32, i32)
+DEF_HELPER_3(reg_write_callback, void, env, i32, i32)
+DEF_HELPER_4(load_callback_pre, void, env, i64, i32, i32)
+DEF_HELPER_4(load_callback_post, void, env, i64, i32, i32)
+DEF_HELPER_4(store_callback_pre, void, env, i64, i32, i32)
+DEF_HELPER_4(store_callback_post, void, env, i64, i32, i32)
+DEF_HELPER_0(atomic_callback, void)
+DEF_HELPER_0(qsim_callback, void)
+
 #ifdef TARGET_AARCH64
 #include "helper-a64.h"
 #endif

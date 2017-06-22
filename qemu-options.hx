@@ -3677,6 +3677,7 @@ available if QEMU has been compiled with the @var{simple}, @var{stderr} or
 
 @item file=@var{file}
 Log output traces to @var{file}.
+
 This option is only available if QEMU has been compiled with
 the @var{simple} tracing backend.
 @end table

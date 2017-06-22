@@ -68,6 +68,16 @@
 #undef MEMSUFFIX
 #endif
 
+extern uint64_t qsim_locked_addr;
+extern bool atomic_flag;
+extern int atomic_locked;
+extern uint64_t atomic_addr;
+extern int nonatomic_locked;
+
+#include "qsim-vm.h"
+
+extern int_cb_t     qsim_int_cb;
+extern int qsim_id;
 /* return non zero if error */
 static inline int load_segment_ra(CPUX86State *env, uint32_t *e1_ptr,
                                uint32_t *e2_ptr, int selector,
@@ -1192,6 +1202,8 @@ static void handle_even_inj(CPUX86State *env, int intno, int is_int,
 }
 #endif
 
+extern int qsim_gen_callbacks;
+
 /*
  * Begin execution of an interruption. is_int is TRUE if coming from
  * the int instruction. next_eip is the env->eip value AFTER the interrupt
@@ -1201,6 +1213,18 @@ static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
                              int error_code, target_ulong next_eip, int is_hw)
 {
     CPUX86State *env = &cpu->env;
+    CPUState *cs = CPU(x86_env_get_cpu(env));
+    qsim_id = cs->cpu_index;
+
+    if (atomic_flag) helper_unlock();
+    if (nonatomic_locked) {
+        nonatomic_locked = 0;
+    }
+
+    if (qsim_gen_callbacks && qsim_int_cb != NULL && qsim_int_cb(qsim_id, intno) && is_int) {
+        env->eip = next_eip;
+        return;
+    }
 
     if (qemu_loglevel_mask(CPU_LOG_INT)) {
         if ((env->cr[0] & CR0_PE_MASK)) {

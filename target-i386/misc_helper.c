@@ -23,11 +23,54 @@
 #include "exec/cpu_ldst.h"
 #include "exec/address-spaces.h"
 
+#include "qsim-vm.h"
+#include "qsim-context.h"
+
+extern uint64_t qsim_icount;
+extern io_cb_t qsim_io_cb;
+extern magic_cb_t qsim_magic_cb;
+extern int qsim_gen_callbacks;
+extern bool qsim_sys_callbacks;
+
+extern qsim_ucontext_t main_context;
+extern qsim_ucontext_t qemu_context;
+
+void checkcontext(void);
+int get_cpuidx(CPUX86State *env);
+CPUX86State* get_env(int cpu_idx);
+
+void checkcontext(void)
+{
+    static bool debug = false;
+    if (debug)
+        printf("swapped context");
+}
+
+int get_cpuidx(CPUX86State *env)
+{
+    X86CPU *cpu = x86_env_get_cpu(env);
+    CPUState *cs = CPU(cpu);
+    return cs->cpu_index;
+}
+
+CPUX86State* get_env(int cpu_idx)
+{
+    CPUX86State *cpu =  (CPUX86State *)first_cpu;
+    CPUState *cs = CPU(cpu);
+    for (; cs && cs->cpu_index != cpu_idx; cs = CPU_NEXT(cs));
+
+    if (cs)
+      cpu = &X86_CPU(cs)->env;
+
+    return cpu;
+}
+
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outb: port=0x%04x, data=%02x\n", port, data);
 #else
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuidx(env), port, 1, 1, data);
     address_space_stb(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -39,8 +82,15 @@ target_ulong helper_inb(CPUX86State *env, uint32_t port)
     fprintf(stderr, "inb: port=0x%04x\n", port);
     return 0;
 #else
-    return address_space_ldub(&address_space_io, port,
-                              cpu_get_mem_attrs(env), NULL);
+    uint32_t *p = NULL;
+    if (qsim_gen_callbacks && qsim_io_cb)
+		p = qsim_io_cb(get_cpuidx(env), port, 1, 0, 0);
+
+    if (!p)
+		return address_space_ldub(&address_space_io, port,
+				                  cpu_get_mem_attrs(env), NULL);
+    else
+		return *p;
 #endif
 }
 
@@ -49,6 +99,7 @@ void helper_outw(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outw: port=0x%04x, data=%04x\n", port, data);
 #else
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuidx(env), port, 2, 1, data);
     address_space_stw(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -60,8 +111,15 @@ target_ulong helper_inw(CPUX86State *env, uint32_t port)
     fprintf(stderr, "inw: port=0x%04x\n", port);
     return 0;
 #else
-    return address_space_lduw(&address_space_io, port,
-                              cpu_get_mem_attrs(env), NULL);
+    uint32_t *p = NULL;
+    if (qsim_gen_callbacks && qsim_io_cb)
+		p = qsim_io_cb(get_cpuidx(env), port, 2, 0, 0);
+
+    if (!p)
+		return address_space_lduw(&address_space_io, port,
+								  cpu_get_mem_attrs(env), NULL);
+    else
+		return *p;
 #endif
 }
 
@@ -70,6 +128,7 @@ void helper_outl(CPUX86State *env, uint32_t port, uint32_t data)
 #ifdef CONFIG_USER_ONLY
     fprintf(stderr, "outw: port=0x%04x, data=%08x\n", port, data);
 #else
+    if (qsim_gen_callbacks && qsim_io_cb) qsim_io_cb(get_cpuidx(env), port, 4, 1, data);
     address_space_stl(&address_space_io, port, data,
                       cpu_get_mem_attrs(env), NULL);
 #endif
@@ -81,8 +140,14 @@ target_ulong helper_inl(CPUX86State *env, uint32_t port)
     fprintf(stderr, "inl: port=0x%04x\n", port);
     return 0;
 #else
-    return address_space_ldl(&address_space_io, port,
-                             cpu_get_mem_attrs(env), NULL);
+    uint32_t *p = NULL;
+    if (qsim_gen_callbacks && qsim_io_cb)
+		p = qsim_io_cb(get_cpuidx(env), port, 4, 0, 0);
+    if (!p)
+		return address_space_ldl(&address_space_io, port,
+				                 cpu_get_mem_attrs(env), NULL);
+    else
+		return *p;
 #endif
 }
 
@@ -96,18 +161,74 @@ void helper_into(CPUX86State *env, int next_eip_addend)
     }
 }
 
+extern uint64_t qsim_tpid;
+extern uint64_t curr_tpid[64];
+
 void helper_cpuid(CPUX86State *env)
 {
     uint32_t eax, ebx, ecx, edx;
+    X86CPU *cpu = x86_env_get_cpu(env);
+    CPUState *cs = CPU(cpu);
+    int cpu_id = cs->cpu_index;
 
+    eax = (uint32_t)env->regs[R_EAX];
+
+    if (eax == 0xaaaaaaaa) {
+        qsim_tpid = curr_tpid[cpu_id];
+        if (!qsim_gen_callbacks) {
+            tb_flush(cs);
+
+            printf("Enabling callback generation ");
+            if (qsim_sys_callbacks)
+                printf("system wide.\n");
+            else
+                printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, cpu_id);
+
+            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+                qsim_swap_ctx();
+        }
+        qsim_gen_callbacks++;
+    } else if (eax == 0xfa11dead) {
+        qsim_gen_callbacks--;
+        if (!qsim_gen_callbacks) {
+            qsim_tpid = -1;
+            tb_flush(cs);
+
+            printf("Disabling callback generation.\n");
+
+            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+                qsim_swap_ctx();
+        }
+    } else if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+        qsim_swap_ctx();
+
+    if ((eax & 0xffff0000) == 0xc75c0000) {
+        // context switch
+        curr_tpid[cpu_id] = eax & 0xffff;
+    }
+
+    eax &= 0xfffffff0;
     cpu_svm_check_intercept_param(env, SVM_EXIT_CPUID, 0);
 
-    cpu_x86_cpuid(env, (uint32_t)env->regs[R_EAX], (uint32_t)env->regs[R_ECX],
-                  &eax, &ebx, &ecx, &edx);
-    env->regs[R_EAX] = eax;
-    env->regs[R_EBX] = ebx;
-    env->regs[R_ECX] = ecx;
-    env->regs[R_EDX] = edx;
+    if (eax == 0x40000000 || eax == 0x80000000 || eax == 0) {
+        cpu_x86_cpuid(env, (uint32_t)env->regs[R_EAX],
+                (uint32_t)env->regs[R_ECX],
+                &eax, &ebx, &ecx, &edx);
+        env->regs[R_EAX] = eax;
+        env->regs[R_EBX] = ebx;
+        env->regs[R_ECX] = ecx;
+        env->regs[R_EDX] = edx;
+    }
+}
+
+void helper_qsim_callback(void)
+{
+    qsim_icount--;
+    if (qsim_icount == 0) {
+        qsim_swap_ctx();
+    }
+
+    return;
 }
 
 #if defined(CONFIG_USER_ONLY)
@@ -231,6 +352,13 @@ void helper_wrmsr(CPUX86State *env)
 
     val = ((uint32_t)env->regs[R_EAX]) |
         ((uint64_t)((uint32_t)env->regs[R_EDX]) << 32);
+
+    /*
+    printf("MSR Write 0x%08x, val=%08llx\n",
+           (unsigned)env->regs[R_ECX], (((unsigned long
+                       long)(unsigned)env->regs[R_EDX])<<32) |
+                                      env->regs[R_EAX]);
+                                      */
 
     switch ((uint32_t)env->regs[R_ECX]) {
     case MSR_IA32_SYSENTER_CS:
@@ -388,6 +516,8 @@ void helper_rdmsr(CPUX86State *env)
     uint64_t val;
 
     cpu_svm_check_intercept_param(env, SVM_EXIT_MSR, 0);
+
+    //printf("MSR Read 0x%08x\n", (unsigned)env->regs[R_ECX]);
 
     switch ((uint32_t)env->regs[R_ECX]) {
     case MSR_IA32_SYSENTER_CS:

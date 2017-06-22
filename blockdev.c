@@ -4297,3 +4297,4 @@ QemuOptsList qemu_drive_opts = {
         { /* end of list */ }
     },
 };
+

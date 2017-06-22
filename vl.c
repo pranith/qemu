@@ -21,6 +21,19 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <time.h>
+#include <errno.h>
+#include <sys/time.h>
+
+#include "qsim-vm.h"
+#include "qsim-func.h"
+
+#include "qsim-context.h"
+
+#include "config-host.h"
 #include "qemu/osdep.h"
 #include "qemu/cutils.h"
 #include "qemu/help_option.h"
@@ -232,6 +245,65 @@ static struct {
     { .driver = "qxl-vga",              .flag = &default_vga       },
     { .driver = "virtio-vga",           .flag = &default_vga       },
 };
+
+int qsim_id;
+
+static void qsim_loop_main(void);
+static int  qsim_qemu_main(int argc, const char **argv, char **envp);
+
+atomic_cb_t qsim_atomic_cb = NULL;
+magic_cb_t  qsim_magic_cb  = NULL;
+int_cb_t    qsim_int_cb    = NULL;
+mem_cb_t    qsim_mem_cb    = NULL;
+inst_cb_t   qsim_inst_cb   = NULL;
+io_cb_t     qsim_io_cb     = NULL;
+reg_cb_t    qsim_reg_cb    = NULL;
+trans_cb_t  qsim_trans_cb  = NULL;
+
+int qsim_gen_callbacks = 0;
+bool qsim_sys_callbacks = false;
+
+bool atomic_flag = false;
+
+uintptr_t	qsim_host_addr;
+uintptr_t	qsim_phys_addr;
+
+int64_t     qsim_icount   = 10000000;
+uint64_t    qsim_tpid     = 0;
+uint64_t    curr_tpid[64];
+
+qsim_ucontext_t main_context;
+qsim_ucontext_t qemu_context;
+
+void *qemu_stack;
+
+const size_t QEMU_STACK_SIZE = 16*(1<<20);
+
+void set_atomic_cb(atomic_cb_t cb) { qsim_atomic_cb = cb; }
+void set_mem_cb   (mem_cb_t    cb) { qsim_mem_cb    = cb; }
+void set_inst_cb  (inst_cb_t   cb) { qsim_inst_cb   = cb; }
+void set_int_cb   (int_cb_t    cb) { qsim_int_cb    = cb; }
+void set_magic_cb (magic_cb_t  cb) { qsim_magic_cb  = cb; }
+void set_io_cb    (io_cb_t     cb) { qsim_io_cb     = cb; }
+void set_reg_cb   (reg_cb_t    cb) { qsim_reg_cb    = cb; }
+void set_trans_cb (trans_cb_t  cb) { qsim_trans_cb  = cb; }
+
+void set_gen_cbs (bool state)
+{
+    // Mark all generated TBs as stale so that new TBs are generated
+    if (state) {
+        qsim_gen_callbacks++;
+    } else {
+        qsim_gen_callbacks--;
+    }
+}
+
+extern void checkcontext(void);
+
+// Generate callbacks for system/application instructions only
+void set_sys_cbs  (bool state) {
+  qsim_sys_callbacks = state;
+}
 
 static QemuOptsList qemu_rtc_opts = {
     .name = "rtc",
@@ -1924,7 +1996,69 @@ static bool main_loop_should_exit(void)
     return false;
 }
 
-static void main_loop(void)
+// -1: not yet called
+//  0: Total system run mode
+//  1: Per cpu run mode
+int run_mode = -1;
+
+uint64_t run(uint64_t insts)
+{
+    run_mode = 0;
+
+    qsim_icount = insts;
+
+    swapcontext(&main_context, &qemu_context);
+    checkcontext();
+
+    return insts - qsim_icount;
+}
+
+uint64_t run_cpu(int cpu_id, uint64_t insts)
+{
+    run_mode = 1;
+
+    qsim_icount = insts;
+    qsim_id = cpu_id;
+    swapcontext(&main_context, &qemu_context);
+    checkcontext();
+
+    return insts - qsim_icount;
+}
+
+typedef struct {
+    QEMUBH *swap_bh;
+} qsim_swap_bh;
+
+/* Swap out to qsim context.
+ *
+ * Depending on run mode, we either swap out right away or schedule a qemu
+ * bottom half to swap out once all the cpus are done execution.
+ */
+void qsim_swap_ctx(void)
+{
+    qsim_swap_bh *bh;
+    if (!run_mode) {
+        qsim_swap(NULL);
+    }
+    else {
+        bh = (qsim_swap_bh *)g_malloc0(sizeof(qsim_swap_bh));
+        bh->swap_bh = qemu_bh_new(qsim_swap, bh);
+        qemu_bh_schedule(bh->swap_bh);
+    }
+}
+
+void qsim_swap(void *opaque)
+{
+    if (opaque) {
+        qsim_swap_bh *bh = (qsim_swap_bh *)opaque;
+        qemu_bh_delete(bh->swap_bh);
+        g_free(bh);
+    }
+    swapcontext(&qemu_context, &main_context);
+    checkcontext();
+}
+
+static void qsim_loop_main(void)
 {
     bool nonblocking;
     int last_io = 0;
@@ -1941,6 +2075,19 @@ static void main_loop(void)
         dev_time += profile_getclock() - ti;
 #endif
     } while (!main_loop_should_exit());
+
+    bdrv_close_all();
+    pause_all_vcpus();
+    res_free();
+#ifdef CONFIG_TPM
+    tpm_cleanup();
+#endif
+
+    // send shutdown signal
+    if (qsim_magic_cb)
+        qsim_magic_cb(0, 0xfa11dead);
+
+    return;
 }
 
 static void version(void)
@@ -2733,15 +2880,15 @@ static void qemu_run_machine_init_done_notifiers(void)
     machine_init_done = true;
 }
 
-static const QEMUOption *lookup_opt(int argc, char **argv,
+static const QEMUOption *lookup_opt(int argc, const char **argv,
                                     const char **poptarg, int *poptind)
 {
     const QEMUOption *popt;
     int optind = *poptind;
-    char *r = argv[optind];
+    const char *r = argv[optind];
     const char *optarg;
 
-    loc_set_cmdline(argv, optind, 1);
+    loc_set_cmdline((char **)argv, optind, 1);
     optind++;
     /* Treat --foo the same as -foo.  */
     if (r[1] == '-')
@@ -2762,7 +2909,7 @@ static const QEMUOption *lookup_opt(int argc, char **argv,
             exit(1);
         }
         optarg = argv[optind++];
-        loc_set_cmdline(argv, optind - 2, 2);
+        loc_set_cmdline((char **)argv, optind - 2, 2);
     } else {
         optarg = NULL;
     }
@@ -2960,7 +3107,32 @@ static void set_memory_options(uint64_t *ram_slots, ram_addr_t *maxram_size,
     loc_pop(&loc);
 }
 
-int main(int argc, char **argv, char **envp)
+void qemu_init(const char* argv[])
+{
+    int argc, i;
+    for (argc = 0; argv[argc] != NULL; argc++);
+
+    for (i = 0; i < 64; i++)
+        curr_tpid[i] = -1;
+
+    // Call main with newly assembled argv.
+    qsim_qemu_main(argc, argv, (char**)environ);
+
+    // Initialize contexts.
+    getcontext(&qemu_context);
+    //getcontext(&main_context);
+
+    // Create qemu stack.
+    qemu_stack = g_malloc0(QEMU_STACK_SIZE);
+
+    // Set up the qemu context.
+    qemu_context.uc_stack.ss_sp = qemu_stack;
+    qemu_context.uc_stack.ss_size = QEMU_STACK_SIZE;
+    qemu_context.uc_link = &main_context;
+    makecontext(&qemu_context, qsim_loop_main, 0);
+}
+
+int qsim_qemu_main(int argc, const char **argv, char **envp)
 {
     int i;
     int snapshot, linux_boot;
@@ -4658,16 +4830,11 @@ int main(int argc, char **argv, char **envp)
 
     os_setup_post();
 
-    main_loop();
-    replay_disable_events();
-    iothread_stop_all();
-
-    bdrv_close_all();
-    pause_all_vcpus();
-    res_free();
-#ifdef CONFIG_TPM
-    tpm_cleanup();
-#endif
+    if (is_daemonized()) {
+        if (!trace_init_backends()) {
+            exit(1);
+        }
+    }
 
     return 0;
 }

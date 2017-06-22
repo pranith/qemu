@@ -35,11 +35,17 @@
 
 #include "trace-tcg.h"
 
+#include "qsim-vm.h"
+#include "qsim-func.h"
+
 static TCGv_i64 cpu_X[32];
 static TCGv_i64 cpu_pc;
 
 /* Load/store exclusive handling */
 static TCGv_i64 cpu_exclusive_high;
+
+extern int qsim_gen_callbacks;
+TCGArg *itype_arg = NULL;
 
 static const char *regnames[] = {
     "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
@@ -80,6 +86,28 @@ typedef void NeonGenTwoDoubleOPFn(TCGv_i64, TCGv_i64, TCGv_i64, TCGv_ptr);
 typedef void NeonGenOneOpFn(TCGv_i64, TCGv_i64);
 typedef void CryptoTwoOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32);
 typedef void CryptoThreeOpEnvFn(TCGv_ptr, TCGv_i32, TCGv_i32, TCGv_i32);
+
+#define QSIM_REG_READ(reg, size)                                         \
+do {                                                                     \
+  TCGv_i32 tmp_reg = tcg_const_i32(reg), tmp_size = tcg_const_i32(size); \
+  gen_helper_reg_read_callback(cpu_env, tmp_reg, tmp_size);              \
+  tcg_temp_free_i32(tmp_reg); tcg_temp_free_i32(tmp_size);               \
+} while(0)
+
+#define QSIM_REG_WRITE(reg, size)                                        \
+do {                                                                     \
+  TCGv_i32 tmp_reg = tcg_const_i32(reg), tmp_size = tcg_const_i32(size); \
+  gen_helper_reg_write_callback(cpu_env, tmp_reg, tmp_size);             \
+  tcg_temp_free_i32(tmp_reg); tcg_temp_free_i32(tmp_size);               \
+} while(0)
+
+static void qsim_set_inst_type(enum inst_type type)
+{
+    if (qsim_gen_callbacks)
+        *itype_arg = type;
+
+    return;
+}
 
 /* initialize TCG globals.  */
 void a64_translate_init(void)
@@ -371,6 +399,9 @@ static TCGv_i64 new_tmp_a64_zero(DisasContext *s)
  */
 static TCGv_i64 cpu_reg(DisasContext *s, int reg)
 {
+    if (qsim_gen_callbacks) {
+        QSIM_REG_WRITE(reg, 4);
+    }
     if (reg == 31) {
         return new_tmp_a64_zero(s);
     } else {
@@ -381,6 +412,9 @@ static TCGv_i64 cpu_reg(DisasContext *s, int reg)
 /* register access for when 31 == SP */
 static TCGv_i64 cpu_reg_sp(DisasContext *s, int reg)
 {
+    if (qsim_gen_callbacks) {
+        QSIM_REG_WRITE(reg, 4);
+    }
     return cpu_X[reg];
 }
 
@@ -391,6 +425,11 @@ static TCGv_i64 cpu_reg_sp(DisasContext *s, int reg)
 static TCGv_i64 read_cpu_reg(DisasContext *s, int reg, int sf)
 {
     TCGv_i64 v = new_tmp_a64(s);
+    int size = 4;
+    if (sf)  size = 8;
+    if (qsim_gen_callbacks) {
+        QSIM_REG_READ(reg, size);
+    }
     if (reg != 31) {
         if (sf) {
             tcg_gen_mov_i64(v, cpu_X[reg]);
@@ -406,6 +445,11 @@ static TCGv_i64 read_cpu_reg(DisasContext *s, int reg, int sf)
 static TCGv_i64 read_cpu_reg_sp(DisasContext *s, int reg, int sf)
 {
     TCGv_i64 v = new_tmp_a64(s);
+    int size = 4;
+    if (sf)  size = 8;
+    if (qsim_gen_callbacks) {
+        QSIM_REG_READ(reg, size);
+    }
     if (sf) {
         tcg_gen_mov_i64(v, cpu_X[reg]);
     } else {
@@ -722,8 +766,23 @@ static void gen_adc_CC(int sf, TCGv_i64 dest, TCGv_i64 t0, TCGv_i64 t1)
 static void do_gpr_st_memidx(DisasContext *s, TCGv_i64 source,
                              TCGv_i64 tcg_addr, int size, int memidx)
 {
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
+
     g_assert(size <= 3);
-    tcg_gen_qemu_st_i64(source, tcg_addr, memidx, s->be_data + size);
+
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(1 << (size & MO_SIZE));
+      tmp_type = tcg_const_i32(1);
+      //gen_helper_store_callback_pre(cpu_env, tcg_addr, tmp_size, tmp_type);
+    }
+
+    tcg_gen_qemu_st_i64(source, tcg_addr, memidx, MO_TE + size);
+
+    if (qsim_gen_callbacks) {
+      gen_helper_store_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    }
 }
 
 static void do_gpr_st(DisasContext *s, TCGv_i64 source,
@@ -738,6 +797,7 @@ static void do_gpr_st(DisasContext *s, TCGv_i64 source,
 static void do_gpr_ld_memidx(DisasContext *s, TCGv_i64 dest, TCGv_i64 tcg_addr,
                              int size, bool is_signed, bool extend, int memidx)
 {
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
     TCGMemOp memop = s->be_data + size;
 
     g_assert(size <= 3);
@@ -746,7 +806,19 @@ static void do_gpr_ld_memidx(DisasContext *s, TCGv_i64 dest, TCGv_i64 tcg_addr,
         memop += MO_SIGN;
     }
 
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(1 << (size & MO_SIZE));
+      tmp_type = tcg_const_i32(0);
+      gen_helper_load_callback_pre(cpu_env, tcg_addr, tmp_size, tmp_type);
+    }
+
     tcg_gen_qemu_ld_i64(dest, tcg_addr, memidx, memop);
+
+    if (qsim_gen_callbacks) {
+      //gen_helper_load_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
+      tcg_temp_free_i32(tmp_size);
+      tcg_temp_free_i32(tmp_type);
+    }
 
     if (extend && is_signed) {
         g_assert(size < 3);
@@ -768,10 +840,21 @@ static void do_fp_st(DisasContext *s, int srcidx, TCGv_i64 tcg_addr, int size)
 {
     /* This writes the bottom N bits of a 128 bit wide vector to memory */
     TCGv_i64 tmp = tcg_temp_new_i64();
+    TCGv_i32 tmp_type = 0, tmp_size = 0;
+
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(1 << (size & MO_SIZE));
+      tmp_type = tcg_const_i32(0);
+    }
+
     tcg_gen_ld_i64(tmp, cpu_env, fp_reg_offset(s, srcidx, MO_64));
     if (size < 4) {
         tcg_gen_qemu_st_i64(tmp, tcg_addr, get_mem_index(s),
                             s->be_data + size);
+
+        if (qsim_gen_callbacks)
+            gen_helper_store_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
+
     } else {
         bool be = s->be_data == MO_BE;
         TCGv_i64 tcg_hiaddr = tcg_temp_new_i64();
@@ -779,10 +862,25 @@ static void do_fp_st(DisasContext *s, int srcidx, TCGv_i64 tcg_addr, int size)
         tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
         tcg_gen_qemu_st_i64(tmp, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
                             s->be_data | MO_Q);
+
+        if (qsim_gen_callbacks)
+            gen_helper_store_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
+
         tcg_gen_ld_i64(tmp, cpu_env, fp_reg_hi_offset(s, srcidx));
+        tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
+        tcg_gen_qemu_st_i64(tmp, tcg_hiaddr, get_mem_index(s), MO_TEQ);
+
+        if (qsim_gen_callbacks)
+            gen_helper_store_callback_post(cpu_env, tcg_addr, tmp_size, tmp_type);
+
         tcg_gen_qemu_st_i64(tmp, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
                             s->be_data | MO_Q);
         tcg_temp_free_i64(tcg_hiaddr);
+    }
+
+    if (qsim_gen_callbacks) {
+       tcg_temp_free_i32(tmp_size);
+       tcg_temp_free_i32(tmp_type);
     }
 
     tcg_temp_free_i64(tmp);
@@ -796,10 +894,20 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
     /* This always zero-extends and writes to a full 128 bit wide vector */
     TCGv_i64 tmplo = tcg_temp_new_i64();
     TCGv_i64 tmphi;
+    TCGv_i32 tmp_type = 0, tmp_size = 0;
+
+    if (qsim_gen_callbacks) {
+      tmp_size = tcg_const_i32(1 << (size & MO_SIZE));
+      tmp_type = tcg_const_i32(0);
+    }
 
     if (size < 4) {
         TCGMemOp memop = s->be_data + size;
         tmphi = tcg_const_i64(0);
+
+        if (qsim_gen_callbacks)
+            gen_helper_load_callback_pre(cpu_env, tcg_addr, tmp_size, tmp_type);
+
         tcg_gen_qemu_ld_i64(tmplo, tcg_addr, get_mem_index(s), memop);
     } else {
         bool be = s->be_data == MO_BE;
@@ -808,9 +916,14 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
         tmphi = tcg_temp_new_i64();
         tcg_hiaddr = tcg_temp_new_i64();
 
+        if (qsim_gen_callbacks)
+            gen_helper_load_callback_pre(cpu_env, tcg_addr, tmp_size, tmp_type);
         tcg_gen_addi_i64(tcg_hiaddr, tcg_addr, 8);
         tcg_gen_qemu_ld_i64(tmplo, be ? tcg_hiaddr : tcg_addr, get_mem_index(s),
                             s->be_data | MO_Q);
+        if (qsim_gen_callbacks)
+            gen_helper_load_callback_pre(cpu_env, tcg_hiaddr, tmp_size, tmp_type);
+
         tcg_gen_qemu_ld_i64(tmphi, be ? tcg_addr : tcg_hiaddr, get_mem_index(s),
                             s->be_data | MO_Q);
         tcg_temp_free_i64(tcg_hiaddr);
@@ -818,6 +931,11 @@ static void do_fp_ld(DisasContext *s, int destidx, TCGv_i64 tcg_addr, int size)
 
     tcg_gen_st_i64(tmplo, cpu_env, fp_reg_offset(s, destidx, MO_64));
     tcg_gen_st_i64(tmphi, cpu_env, fp_reg_hi_offset(s, destidx));
+
+    if (qsim_gen_callbacks) {
+       tcg_temp_free_i32(tmp_size);
+       tcg_temp_free_i32(tmp_type);
+    }
 
     tcg_temp_free_i64(tmplo);
     tcg_temp_free_i64(tmphi);
@@ -1712,8 +1830,17 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 {
     TCGv_i64 tmp = tcg_temp_new_i64();
     TCGMemOp memop = s->be_data + size;
+    TCGv_i32 tmp_size = 0;
+    TCGv_i32 tmp_type = 0;
 
     g_assert(size <= 3);
+
+    if (qsim_gen_callbacks) {
+        tmp_size = tcg_const_i32(1 << (size & MO_SIZE));
+        tmp_type = tcg_const_i32(0);
+        gen_helper_load_callback_pre(cpu_env, addr, tmp_size, tmp_type);
+    }
+
     tcg_gen_qemu_ld_i64(tmp, addr, get_mem_index(s), memop);
 
     if (is_pair) {
@@ -1722,11 +1849,20 @@ static void gen_load_exclusive(DisasContext *s, int rt, int rt2,
 
         g_assert(size >= 2);
         tcg_gen_addi_i64(addr2, addr, 1 << size);
+
+        if (qsim_gen_callbacks)
+            gen_helper_load_callback_pre(cpu_env, addr2, tmp_size, tmp_type);
+
         tcg_gen_qemu_ld_i64(hitmp, addr2, get_mem_index(s), memop);
         tcg_temp_free_i64(addr2);
         tcg_gen_mov_i64(cpu_exclusive_high, hitmp);
         tcg_gen_mov_i64(cpu_reg(s, rt2), hitmp);
         tcg_temp_free_i64(hitmp);
+    }
+
+    if (qsim_gen_callbacks) {
+        tcg_temp_free_i32(tmp_size);
+        tcg_temp_free_i32(tmp_type);
     }
 
     tcg_gen_mov_i64(cpu_exclusive_val, tmp);
@@ -1765,6 +1901,8 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     TCGLabel *done_label = gen_new_label();
     TCGv_i64 addr = tcg_temp_local_new_i64();
     TCGv_i64 tmp;
+    TCGv_i32 tmp_size = 0;
+    TCGv_i32 tmp_type = 0;
 
     /* Copy input into a local temp so it is not trashed when the
      * basic block ends at the branch insn.
@@ -1793,13 +1931,29 @@ static void gen_store_exclusive(DisasContext *s, int rd, int rt, int rt2,
     /* We seem to still have the exclusive monitor, so do the store */
     tcg_gen_qemu_st_i64(cpu_reg(s, rt), addr, get_mem_index(s),
                         s->be_data + size);
+
+    if (qsim_gen_callbacks) {
+        tmp_size = tcg_const_i32(1 << (size & MO_SIZE));
+        tmp_type = tcg_const_i32(1);
+        gen_helper_store_callback_post(cpu_env, addr, tmp_size, tmp_type);
+    }
+
     if (is_pair) {
         TCGv_i64 addrhi = tcg_temp_new_i64();
 
         tcg_gen_addi_i64(addrhi, addr, 1 << size);
         tcg_gen_qemu_st_i64(cpu_reg(s, rt2), addrhi,
                             get_mem_index(s), s->be_data + size);
+
+        if (qsim_gen_callbacks)
+            gen_helper_store_callback_post(cpu_env, addrhi, tmp_size, tmp_type);
+
         tcg_temp_free_i64(addrhi);
+    }
+
+    if (qsim_gen_callbacks) {
+        tcg_temp_free_i32(tmp_size);
+        tcg_temp_free_i32(tmp_type);
     }
 
     tcg_temp_free_i64(addr);
@@ -1857,6 +2011,8 @@ static void disas_ldst_excl(DisasContext *s, uint32_t insn)
      */
 
     if (is_excl) {
+        if (qsim_gen_callbacks)
+          gen_helper_atomic_callback();
         if (!is_store) {
             s->is_ldex = true;
             gen_load_exclusive(s, rt, rt2, tcg_addr, size, is_pair);
@@ -4564,9 +4720,11 @@ static void handle_fp_2src_single(DisasContext *s, int opcode,
 
     switch (opcode) {
     case 0x0: /* FMUL */
+        qsim_set_inst_type(QSIM_INST_FPMUL);
         gen_helper_vfp_muls(tcg_res, tcg_op1, tcg_op2, fpst);
         break;
     case 0x1: /* FDIV */
+        qsim_set_inst_type(QSIM_INST_FPDIV);
         gen_helper_vfp_divs(tcg_res, tcg_op1, tcg_op2, fpst);
         break;
     case 0x2: /* FADD */
@@ -4617,9 +4775,11 @@ static void handle_fp_2src_double(DisasContext *s, int opcode,
 
     switch (opcode) {
     case 0x0: /* FMUL */
+        qsim_set_inst_type(QSIM_INST_FPMUL);
         gen_helper_vfp_muld(tcg_res, tcg_op1, tcg_op2, fpst);
         break;
     case 0x1: /* FDIV */
+        qsim_set_inst_type(QSIM_INST_FPDIV);
         gen_helper_vfp_divd(tcg_res, tcg_op1, tcg_op2, fpst);
         break;
     case 0x2: /* FADD */
@@ -5141,6 +5301,7 @@ static void disas_fp_int_conv(DisasContext *s, uint32_t insn)
  */
 static void disas_data_proc_fp(DisasContext *s, uint32_t insn)
 {
+    qsim_set_inst_type(QSIM_INST_FPBASIC);
     if (extract32(insn, 24, 1)) {
         /* Floating point data-processing (3 source) */
         disas_fp_3src(s, insn);
@@ -10967,6 +11128,7 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
     if (extract32(insn, 28, 1) == 1 && extract32(insn, 30, 1) == 0) {
         disas_data_proc_fp(s, insn);
     } else {
+        qsim_set_inst_type(QSIM_INST_FPDIV);
         /* SIMD, including crypto */
         disas_data_proc_simd(s, insn);
     }
@@ -10976,9 +11138,27 @@ static void disas_data_proc_simd_fp(DisasContext *s, uint32_t insn)
 static void disas_a64_insn(CPUARMState *env, DisasContext *s)
 {
     uint32_t insn;
+    TCGv_i32 tmp_size, tmp_type;
+    TCGv_i64 tmp_insn;
 
     insn = arm_ldl_code(env, s->pc, s->sctlr_b);
     s->insn = insn;
+
+    // hack to encode the instruction type and arg length
+    // ilen_arg  = tcg_ctx.gen_opparam_ptr + 3;
+    if (qsim_gen_callbacks) {
+        int itype_arg_idx = tcg_ctx.gen_next_parm_idx + 5;
+        itype_arg = &tcg_ctx.gen_opparam_buf[itype_arg_idx];
+        tmp_insn = tcg_const_i64(s->pc);
+        tmp_size = tcg_const_i32(4);
+        tmp_type = tcg_const_i32(0xdeadbeef);
+        gen_helper_inst_callback(cpu_env, tmp_insn, tmp_size, tmp_type);
+        tcg_temp_free_i64(tmp_insn);
+        tcg_temp_free_i32(tmp_size);
+        tcg_temp_free_i32(tmp_type);
+    } else {
+        gen_helper_qsim_callback();
+    }
     s->pc += 4;
 
     s->fp_access_checked = false;
@@ -10988,19 +11168,23 @@ static void disas_a64_insn(CPUARMState *env, DisasContext *s)
         unallocated_encoding(s);
         break;
     case 0x8: case 0x9: /* Data processing - immediate */
+        qsim_set_inst_type(QSIM_INST_NULL);
         disas_data_proc_imm(s, insn);
         break;
     case 0xa: case 0xb: /* Branch, exception generation and system insns */
+        qsim_set_inst_type(QSIM_INST_BR);
         disas_b_exc_sys(s, insn);
         break;
     case 0x4:
     case 0x6:
     case 0xc:
     case 0xe:      /* Loads and stores */
+        qsim_set_inst_type(QSIM_INST_NULL);
         disas_ldst(s, insn);
         break;
     case 0x5:
     case 0xd:      /* Data processing - register */
+        qsim_set_inst_type(QSIM_INST_NULL);
         disas_data_proc_reg(s, insn);
         break;
     case 0x7:
