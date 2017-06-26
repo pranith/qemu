@@ -1124,7 +1124,9 @@ static uint64_t pmxevtyper_read(CPUARMState *env, const ARMCPRegInfo *ri)
     }
 }
 
-bool enable_instrumentation;
+extern bool enable_instrumentation;
+extern void print_tlb_stats(void);
+extern void clear_tlb_stats(void);
 
 static void pmuserenr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
@@ -1139,6 +1141,8 @@ static void pmuserenr_write(CPUARMState *env, const ARMCPRegInfo *ri,
     } else if (value == 0xfa11dead) {
         printf("Disabling instrumentation\n");
         enable_instrumentation = false;
+        print_tlb_stats();
+        clear_tlb_stats();
         tb_flush(cs);
     }
 

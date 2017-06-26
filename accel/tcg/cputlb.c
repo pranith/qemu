@@ -864,13 +864,19 @@ static void io_writex(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
     }
 }
 
+extern bool enable_instrumentation;
+
 /* Return true if ADDR is present in the victim tlb, and has been copied
    back to the main tlb.  */
 static bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
                            size_t elt_ofs, target_ulong page)
 {
     size_t vidx;
-    env->tlb_access_victim++;
+
+    if (enable_instrumentation) {
+        env->tlb_access_victim++;
+    }
+
     for (vidx = 0; vidx < CPU_VTLB_SIZE; ++vidx) {
         CPUTLBEntry *vtlb = &env->tlb_v_table[mmu_idx][vidx];
         target_ulong cmp = *(target_ulong *)((uintptr_t)vtlb + elt_ofs);
@@ -886,7 +892,11 @@ static bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
             CPUIOTLBEntry tmpio, *io = &env->iotlb[mmu_idx][index];
             CPUIOTLBEntry *vio = &env->iotlb_v[mmu_idx][vidx];
             tmpio = *io; *io = *vio; *vio = tmpio;
-            env->tlb_access_victim_hit++;
+
+            if (enable_instrumentation) {
+                env->tlb_access_victim_hit++;
+            }
+
             return true;
         }
     }

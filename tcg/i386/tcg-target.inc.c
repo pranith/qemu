@@ -1250,6 +1250,8 @@ static void * const qemu_st_helpers[16] = {
     [MO_BEQ]  = helper_be_stq_mmu,
 };
 
+extern bool enable_instrumentation;
+
 /* Perform the TLB load and compare.
 
    Inputs:
@@ -1300,9 +1302,11 @@ static inline void tcg_out_tlb_load(TCGContext *s, TCGReg addrlo, TCGReg addrhi,
         }
     }
 
-    tcg_out_ld(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_total));
-    tcg_out_addi(s, r0, 1);
-    tcg_out_st(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_total));
+    if (enable_instrumentation) {
+        tcg_out_ld(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_total));
+        tcg_out_addi(s, r0, 1);
+        tcg_out_st(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_total));
+    }
 
     tcg_out_mov(s, tlbtype, r0, addrlo);
     tlb_mask = (target_ulong)TARGET_PAGE_MASK | a_mask;
@@ -1356,9 +1360,11 @@ static inline void tcg_out_tlb_load(TCGContext *s, TCGReg addrlo, TCGReg addrhi,
     tcg_out_modrm_offset(s, OPC_ADD_GvEv + hrexw, r1, r0,
                          offsetof(CPUTLBEntry, addend) - which);
 
-    tcg_out_ld(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_hit));
-    tcg_out_addi(s, r0, 1);
-    tcg_out_st(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_hit));
+    if (enable_instrumentation) {
+        tcg_out_ld(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_hit));
+        tcg_out_addi(s, r0, 1);
+        tcg_out_st(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_hit));
+    }
 }
 
 /*

@@ -1614,6 +1614,20 @@ void print_tlb_stats(void)
     }
 }
 
+void clear_tlb_stats(void)
+{
+    CPUState *cpu;
+    CPU_FOREACH(cpu) {
+        CPUArchState *cs = cpu->env_ptr;
+
+        cs->tlb_access_total        = 0;
+        cs->tlb_access_hit          = 0;
+        cs->tlb_access_victim       = 0;
+        cs->tlb_access_victim       = 0;
+        cs->tlb_access_victim_hit   = 0;
+    }
+}
+
 void pause_all_vcpus(void)
 {
     CPUState *cpu;
