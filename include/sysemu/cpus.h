@@ -10,6 +10,7 @@ void resume_all_vcpus(void);
 void pause_all_vcpus(void);
 void cpu_stop_current(void);
 void cpu_ticks_init(void);
+void print_tlb_stats(void);
 
 void configure_icount(QemuOpts *opts, Error **errp);
 extern int use_icount;

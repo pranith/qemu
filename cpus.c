@@ -1602,6 +1602,18 @@ static bool all_vcpus_paused(void)
     return true;
 }
 
+void print_tlb_stats(void)
+{
+    CPUState *cpu;
+    CPU_FOREACH(cpu) {
+        CPUArchState *cs = cpu->env_ptr;
+
+        fprintf(stderr, "TLB accesses %lu, hits %lu, victim accesses %lu, hits %lu\n",
+                cs->tlb_access_total, cs->tlb_access_hit, cs->tlb_access_victim,
+                cs->tlb_access_victim_hit);
+    }
+}
+
 void pause_all_vcpus(void)
 {
     CPUState *cpu;

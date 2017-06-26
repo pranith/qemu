@@ -138,6 +138,10 @@ typedef struct CPUIOTLBEntry {
     target_ulong tlb_flush_addr;                                        \
     target_ulong tlb_flush_mask;                                        \
     target_ulong vtlb_index;                                            \
+    target_ulong tlb_access_hit;                                        \
+    target_ulong tlb_access_total;                                      \
+    target_ulong tlb_access_victim;                                     \
+    target_ulong tlb_access_victim_hit;                                 \
 
 #else
 

@@ -1300,6 +1300,10 @@ static inline void tcg_out_tlb_load(TCGContext *s, TCGReg addrlo, TCGReg addrhi,
         }
     }
 
+    tcg_out_ld(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_total));
+    tcg_out_addi(s, r0, 1);
+    tcg_out_st(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_total));
+
     tcg_out_mov(s, tlbtype, r0, addrlo);
     tlb_mask = (target_ulong)TARGET_PAGE_MASK | a_mask;
 
@@ -1348,11 +1352,13 @@ static inline void tcg_out_tlb_load(TCGContext *s, TCGReg addrlo, TCGReg addrhi,
         s->code_ptr += 4;
     }
 
-    /* TLB Hit.  */
-
     /* add addend(r0), r1 */
     tcg_out_modrm_offset(s, OPC_ADD_GvEv + hrexw, r1, r0,
                          offsetof(CPUTLBEntry, addend) - which);
+
+    tcg_out_ld(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_hit));
+    tcg_out_addi(s, r0, 1);
+    tcg_out_st(s, TCG_TYPE_I64, r0, TCG_AREG0, offsetof(CPUArchState, tlb_access_hit));
 }
 
 /*

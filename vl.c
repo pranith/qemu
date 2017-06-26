@@ -4761,5 +4761,6 @@ int main(int argc, char **argv, char **envp)
     qemu_chr_cleanup();
     /* TODO: unref root container, check all devices are ok */
 
+    print_tlb_stats();
     return 0;
 }
