@@ -1095,6 +1095,10 @@ void HELPER(inst_callback)(CPUARMState *env, uint64_t vaddr, uint32_t length, ui
     if (!qsim_sys_callbacks && extract64(env->cp15.contextidr_el[1], 0, 32) != qsim_tpid)
         return;
 
+    // enable userspace instruction callbacks based on sys_callbacks flag
+    if (!qsim_sys_callbacks && (vaddr & 0xffffffff00000000))
+       return;
+
     if (qsim_inst_cb != NULL) {
         uint8_t *buf;
 
