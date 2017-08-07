@@ -184,7 +184,7 @@ void helper_cpuid(CPUX86State *env)
             else
                 printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, cpu_id);
 
-            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX], env->regs[R_EBX]))
                 qsim_swap_ctx();
         }
         qsim_gen_callbacks++;
@@ -196,10 +196,10 @@ void helper_cpuid(CPUX86State *env)
 
             printf("Disabling callback generation.\n");
 
-            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+            if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX], env->regs[R_EBX]))
                 qsim_swap_ctx();
         }
-    } else if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX]))
+    } else if (qsim_magic_cb && qsim_magic_cb(cpu_id, env->regs[R_EAX], env->regs[R_EBX]))
         qsim_swap_ctx();
 
     if ((eax & 0xffff0000) == 0xc75c0000) {

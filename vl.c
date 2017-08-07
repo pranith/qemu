@@ -2085,7 +2085,7 @@ static void qsim_loop_main(void)
 
     // send shutdown signal
     if (qsim_magic_cb)
-        qsim_magic_cb(0, 0xfa11dead);
+        qsim_magic_cb(0, 0xfa11dead, 0x00000000);
 
     return;
 }

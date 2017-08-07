@@ -881,8 +881,8 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                 printf("for pid %" PRIu64 " on core %d.\n", qsim_tpid, qsim_id);
 
             // Call magic cb the first time
-            if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
-                qsim_swap_ctx();
+            if (qsim_magic_cb && qsim_magic_cb(qsim_id, value, 0)) { // 0 in the 3rd argument of qsim_magic_cb represents
+                qsim_swap_ctx();                                     // the ebx but is not needed in case of arm
             }
         }
         qsim_gen_callbacks++;
@@ -895,11 +895,11 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
           printf("Disabling callback generation\n");
 
           // Call magic cb the last time
-          if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+          if (qsim_magic_cb && qsim_magic_cb(qsim_id, value, 0)) {
               qsim_swap_ctx();
           }
       }
-    } else if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
+    } else if (qsim_magic_cb && qsim_magic_cb(qsim_id, value, 0)) {
         qsim_swap_ctx();
     }
 
