@@ -24,6 +24,7 @@
 #include "sysemu/cpus.h"
 
 static QemuMutex qemu_cpu_list_lock;
+static QemuMutex qemu_wi_pool_lock;
 static QemuCond exclusive_cond;
 static QemuCond exclusive_resume;
 static QemuCond qemu_work_cond;
@@ -32,6 +33,49 @@ static QemuCond qemu_work_cond;
  * under qemu_cpu_list_lock, read with atomic operations.
  */
 static int pending_cpus;
+
+typedef struct qemu_work_item {
+    struct qemu_work_item *next;
+    run_on_cpu_func func;
+    run_on_cpu_data data;
+    bool free, exclusive, done;
+} qemu_work_item;
+
+typedef struct qemu_wi_pool {
+    qemu_work_item *head;
+    int num_items;
+} qemu_wi_pool;
+
+qemu_wi_pool *wi_free_pool;
+
+static void qemu_init_workitem_pool(void)
+{
+    wi_free_pool = g_malloc0(sizeof(qemu_wi_pool));
+}
+
+static void qemu_wi_pool_insert(qemu_work_item *item)
+{
+    qemu_mutex_lock(&qemu_wi_pool_lock);
+    qemu_work_item *curr = atomic_read(&wi_free_pool->head);
+    item->next = curr;
+    wi_free_pool->head = item;
+    qemu_mutex_unlock(&qemu_wi_pool_lock);
+}
+
+static qemu_work_item* qemu_wi_pool_remove(void)
+{
+    qemu_mutex_lock(&qemu_wi_pool_lock);
+    qemu_work_item *curr = atomic_read(&wi_free_pool->head);
+    if (curr == NULL) {
+        goto out;
+    }
+    wi_free_pool->head = curr->next;
+    curr->next = NULL;
+
+ out:
+    qemu_mutex_unlock(&qemu_wi_pool_lock);
+    return curr;
+}
 
 void qemu_init_cpu_list(void)
 {
@@ -43,6 +87,9 @@ void qemu_init_cpu_list(void)
     qemu_cond_init(&exclusive_cond);
     qemu_cond_init(&exclusive_resume);
     qemu_cond_init(&qemu_work_cond);
+
+    qemu_init_workitem_pool();
+    qemu_mutex_init(&qemu_wi_pool_lock);
 }
 
 void cpu_list_lock(void)
@@ -106,14 +153,7 @@ void cpu_list_remove(CPUState *cpu)
     qemu_mutex_unlock(&qemu_cpu_list_lock);
 }
 
-struct qemu_work_item {
-    struct qemu_work_item *next;
-    run_on_cpu_func func;
-    run_on_cpu_data data;
-    bool free, exclusive, done;
-};
-
-static void queue_work_on_cpu(CPUState *cpu, struct qemu_work_item *wi)
+static void queue_work_on_cpu(CPUState *cpu, qemu_work_item *wi)
 {
     qemu_mutex_lock(&cpu->work_mutex);
     if (cpu->queued_work_first == NULL) {
@@ -132,7 +172,7 @@ static void queue_work_on_cpu(CPUState *cpu, struct qemu_work_item *wi)
 void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data,
                    QemuMutex *mutex)
 {
-    struct qemu_work_item wi;
+    qemu_work_item wi;
 
     if (qemu_cpu_is_self(cpu)) {
         func(cpu, data);
@@ -156,9 +196,11 @@ void do_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data,
 
 void async_run_on_cpu(CPUState *cpu, run_on_cpu_func func, run_on_cpu_data data)
 {
-    struct qemu_work_item *wi;
+    qemu_work_item *wi = qemu_wi_pool_remove();
 
-    wi = g_malloc0(sizeof(struct qemu_work_item));
+    if (!wi) {
+        wi = g_malloc0(sizeof(qemu_work_item));
+    }
     wi->func = func;
     wi->data = data;
     wi->free = true;
@@ -299,9 +341,11 @@ void cpu_exec_end(CPUState *cpu)
 void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func,
                            run_on_cpu_data data)
 {
-    struct qemu_work_item *wi;
+    qemu_work_item *wi = qemu_wi_pool_remove();
 
-    wi = g_malloc0(sizeof(struct qemu_work_item));
+    if (!wi) {
+        wi = g_malloc0(sizeof(qemu_work_item));
+    }
     wi->func = func;
     wi->data = data;
     wi->free = true;
@@ -312,7 +356,7 @@ void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func,
 
 void process_queued_cpu_work(CPUState *cpu)
 {
-    struct qemu_work_item *wi;
+    qemu_work_item *wi;
 
     if (cpu->queued_work_first == NULL) {
         return;
@@ -343,7 +387,8 @@ void process_queued_cpu_work(CPUState *cpu)
         }
         qemu_mutex_lock(&cpu->work_mutex);
         if (wi->free) {
-            g_free(wi);
+            memset(wi, 0, sizeof(qemu_work_item));
+            qemu_wi_pool_insert(wi);
         } else {
             atomic_mb_set(&wi->done, true);
         }
