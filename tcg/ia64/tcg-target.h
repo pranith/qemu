@@ -195,4 +195,6 @@ static inline void flush_icache_range(uintptr_t start, uintptr_t stop)
     asm volatile (";;sync.i;;srlz.i;;");
 }
 
+#define TCG_TARGET_DEFAULT_MO (0)
+
 #endif
