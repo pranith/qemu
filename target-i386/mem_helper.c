@@ -49,6 +49,9 @@ extern int get_cpuidx(CPUX86State *env);
 
 extern CPUX86State* get_env(int cpu_idx);
 
+static void memop_callback(CPUX86State *env, target_ulong vaddr,
+                           target_ulong size, int type);
+
 /* broken thread support */
 
 #if defined(CONFIG_USER_ONLY)
@@ -94,7 +97,9 @@ void helper_cmpxchg8b(CPUX86State *env, target_ulong a0)
     int eflags;
 
     eflags = cpu_cc_compute_all(env, CC_OP);
+    memop_callback(env, a0, 8, 0);
     d = cpu_ldq_data_ra(env, a0, GETPC());
+    memop_callback(env, a0, 8, 1);
     if (d == (((uint64_t)env->regs[R_EDX] << 32) | (uint32_t)env->regs[R_EAX])) {
         cpu_stq_data_ra(env, a0, ((uint64_t)env->regs[R_ECX] << 32)
                                   | (uint32_t)env->regs[R_EBX], GETPC());
@@ -119,8 +124,10 @@ void helper_cmpxchg16b(CPUX86State *env, target_ulong a0)
         raise_exception_ra(env, EXCP0D_GPF, GETPC());
     }
     eflags = cpu_cc_compute_all(env, CC_OP);
+    memop_callback(env, a0, 16, 0);
     d0 = cpu_ldq_data_ra(env, a0, GETPC());
     d1 = cpu_ldq_data_ra(env, a0 + 8, GETPC());
+    memop_callback(env, a0, 16, 1);
     if (d0 == env->regs[R_EAX] && d1 == env->regs[R_EDX]) {
         cpu_stq_data_ra(env, a0, env->regs[R_EBX], GETPC());
         cpu_stq_data_ra(env, a0 + 8, env->regs[R_ECX], GETPC());
@@ -141,6 +148,7 @@ void helper_boundw(CPUX86State *env, target_ulong a0, int v)
 {
     int low, high;
 
+    memop_callback(env, a0, 4, 0);
     low = cpu_ldsw_data_ra(env, a0, GETPC());
     high = cpu_ldsw_data_ra(env, a0 + 2, GETPC());
     v = (int16_t)v;
@@ -156,6 +164,7 @@ void helper_boundl(CPUX86State *env, target_ulong a0, int v)
 {
     int low, high;
 
+    memop_callback(env, a0, 8, 0);
     low = cpu_ldl_data_ra(env, a0, GETPC());
     high = cpu_ldl_data_ra(env, a0 + 4, GETPC());
     if (v < low || v > high) {
