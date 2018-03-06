@@ -132,12 +132,12 @@ do {                                                            \
         hret = tcg_temp_new_i64();                              \
         tcg_gen_qemu_ld_tl(hret, addr, idx, mop);               \
         gen_helper_store_callback_pre(cpu_env, addr,            \
-            tcg_const_i32(1 << (idx & MO_SIZE)), data);         \
+            tcg_const_i32(1 << (mop & MO_SIZE)), data);         \
     }                                                           \
     tcg_gen_qemu_st_tl(data, addr, idx, mop);                   \
     if (qsim_gen_callbacks) {                                   \
         gen_helper_store_callback_post(cpu_env, addr,           \
-            tcg_const_i32(1 << (idx & MO_SIZE)), data);         \
+            tcg_const_i32(1 << (mop & MO_SIZE)), data);         \
         tcg_temp_free_i64(hret);                                \
     }                                                           \
 } while (0)
@@ -148,12 +148,12 @@ do {                                                            \
     hret = tcg_temp_new_i64();                                  \
     tcg_gen_qemu_ld_tl(hret, addr, idx, mop);                   \
     gen_helper_load_callback_pre(cpu_env, addr,                 \
-            tcg_const_i32(1 << (idx & MO_SIZE)), tcg_const_i32(0));               \
+            tcg_const_i32(1 << (mop & MO_SIZE)), tcg_const_i32(0));               \
     }                                                           \
     tcg_gen_qemu_ld_tl(data, addr, idx, mop);                   \
     if (qsim_gen_callbacks) {                                   \
     gen_helper_load_callback_post(cpu_env, addr,          \
-            tcg_const_i32(1 << (idx & MO_SIZE)), tcg_const_i32(0));               \
+            tcg_const_i32(1 << (mop & MO_SIZE)), tcg_const_i32(0));               \
     tcg_temp_free_i64(hret);                                    \
     }                                                           \
 } while (0)
