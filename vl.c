@@ -30,6 +30,7 @@
 #include "qemu/cutils.h"
 #include "qemu/help_option.h"
 #include "qemu/uuid.h"
+#include "qemu/plugins.h"
 #include "sysemu/seccomp.h"
 #include "sysemu/tcg.h"
 
@@ -4346,7 +4347,9 @@ int main(int argc, char **argv, char **envp)
     }
     parse_numa_opts(current_machine);
 
+#ifdef CONFIG_PLUGINS
     qemu_plugins_init();
+#endif
 
     /* do monitor/qmp handling at preconfig state if requested */
     main_loop();

@@ -82,9 +82,11 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
             }
         }
 
+#ifdef CONFIG_PLUGINS
         if (plugins_need_before_insn(db->pc_next, cpu)) {
             plugins_instrument_before_insn(db->pc_next, cpu);
         }
+#endif
 
         /* Disassemble one instruction.  The translate_insn hook should
            update db->pc_next and db->is_jmp to indicate what should be
