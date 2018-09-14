@@ -899,6 +899,11 @@ static void pmcr_write(CPUARMState *env, const ARMCPRegInfo *ri,
               qsim_swap_ctx();
           }
       }
+    } else if (value == 0xabababab) {
+        // save state and exit
+        qsim_savevm_state("asdf.state");
+        if (qsim_magic_cb)
+            qsim_magic_cb(qsim_id, value);
     } else if (qsim_magic_cb && qsim_magic_cb(qsim_id, value)) {
         qsim_swap_ctx();
     }
