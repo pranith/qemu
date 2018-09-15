@@ -7,9 +7,15 @@ bool plugin_init(const char *args)
     return true;
 }
 
+extern bool enable_instrumentation;
+
 bool plugin_needs_before_insn(uint64_t pc, void *cpu)
 {
-    return true;
+    if (enable_instrumentation) {
+        return true;
+    }
+
+    return false;
 }
 
 void plugin_before_insn(uint64_t pc, void *cpu)
