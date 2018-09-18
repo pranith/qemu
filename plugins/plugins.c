@@ -13,6 +13,7 @@
 typedef bool (*PluginInitFunc)(const char *);
 typedef bool (*PluginNeedsBeforeInsnFunc)(uint64_t, void *);
 typedef void (*PluginBeforeInsnFunc)(uint64_t, void *);
+typedef void (*PluginAfterMemFunc)(void *, uint64_t, int, int);
 
 typedef struct QemuPluginInfo {
     const char *filename;
@@ -22,6 +23,7 @@ typedef struct QemuPluginInfo {
     PluginInitFunc init;
     PluginNeedsBeforeInsnFunc needs_before_insn;
     PluginBeforeInsnFunc before_insn;
+    PluginAfterMemFunc after_mem;
 
     QLIST_ENTRY(QemuPluginInfo) next;
 } QemuPluginInfo;
@@ -79,6 +81,8 @@ void qemu_plugin_load(const char *filename, const char *args)
         (gpointer*)&info->needs_before_insn);
     g_module_symbol(g_module, "plugin_before_insn",
         (gpointer*)&info->before_insn);
+    g_module_symbol(g_module, "plugin_after_mem",
+        (gpointer*)&info->after_mem);
 
     QLIST_INSERT_HEAD(&qemu_plugins, info, next);
 
@@ -117,6 +121,17 @@ void helper_before_insn(target_ulong pc, void *cpu)
             }
         }
     }
+}
+
+void helper_mem_callback(void *cpu, uint64_t addr,
+                         uint32_t size, uint32_t type)
+{
+    fprintf(stderr, "addr: %lx, size: %d, type: %d\n", addr, size, type);
+    QemuPluginInfo *info;
+    QLIST_FOREACH(info, &qemu_plugins, next) {
+        info->after_mem(cpu, addr, size, type);
+    }
+    return;
 }
 
 void qemu_plugins_init(void)
