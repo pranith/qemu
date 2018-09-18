@@ -3960,6 +3960,23 @@ address_space_write_cached_slow(MemoryRegionCache *cache, hwaddr addr,
 #define RCU_READ_UNLOCK()        ((void)0)
 #include "memory_ldst.inc.c"
 
+hwaddr cpu_memory_phys_addr(CPUState *cpu, target_ulong addr)
+{
+    hwaddr phys_addr;
+    target_ulong page;
+
+    cpu_synchronize_state(cpu);
+    MemTxAttrs attrs;
+
+    page = addr & TARGET_PAGE_MASK;
+    phys_addr = cpu_get_phys_page_attrs_debug(cpu, page, &attrs);
+    if (phys_addr == -1)
+        return -1;
+    phys_addr += (addr & ~TARGET_PAGE_MASK);
+
+    return phys_addr;
+}
+
 /* virtual memory access for debug (includes writing to ROM) */
 int cpu_memory_rw_debug(CPUState *cpu, target_ulong addr,
                         uint8_t *buf, target_ulong len, int is_write)
