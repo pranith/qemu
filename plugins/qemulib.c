@@ -14,6 +14,11 @@ void qemulib_log(const char *fmt, ...)
     va_end(args);
 }
 
+uint64_t qemulib_translate_memory(void *cpu, uint64_t addr)
+{
+    return cpu_memory_phys_addr(cpu, addr);
+}
+
 int qemulib_read_memory(void *cpu, uint64_t addr, uint8_t *buf, int len)
 {
     return cpu_memory_rw_debug(cpu, addr, buf, len, false);
@@ -28,4 +33,11 @@ int qemulib_read_register(void *cpu, uint8_t *mem_buf, int reg)
     }
 
     return 0;
+}
+
+int qemulib_get_cpuid(void *cpu)
+{
+    CPUState *cs = CPU(cpu);
+
+    return cs ? cs->cpu_index : -1;
 }

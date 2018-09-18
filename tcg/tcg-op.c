@@ -2692,26 +2692,54 @@ static void tcg_gen_req_mo(TCGBar type)
     }
 }
 
+extern bool enable_instrumentation;
+
 void tcg_gen_qemu_ld_i32(TCGv_i32 val, TCGv addr, TCGArg idx, TCGMemOp memop)
 {
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
+    TCGv_ptr tmp_ptr;
     tcg_gen_req_mo(TCG_MO_LD_LD | TCG_MO_ST_LD);
     memop = tcg_canonicalize_memop(memop, 0, 0);
     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
                                addr, trace_mem_get_info(memop, 0));
     gen_ldst_i32(INDEX_op_qemu_ld_i32, val, addr, memop, idx);
+    if (enable_instrumentation) {
+        int size = (1 << (memop & MO_SIZE)) * 8;
+        tmp_size = tcg_const_i32(size);
+        tmp_type = tcg_const_i32(0);
+        tmp_ptr  = tcg_const_ptr(tcg_ctx->cpu);
+        gen_helper_mem_callback(tmp_ptr, addr, tmp_size, tmp_type);
+        tcg_temp_free_i32(tmp_size);
+        tcg_temp_free_i32(tmp_type);
+        tcg_temp_free_ptr(tmp_ptr);
+    }
 }
 
 void tcg_gen_qemu_st_i32(TCGv_i32 val, TCGv addr, TCGArg idx, TCGMemOp memop)
 {
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
+    TCGv_ptr tmp_ptr;
     tcg_gen_req_mo(TCG_MO_LD_ST | TCG_MO_ST_ST);
     memop = tcg_canonicalize_memop(memop, 0, 1);
     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
                                addr, trace_mem_get_info(memop, 1));
     gen_ldst_i32(INDEX_op_qemu_st_i32, val, addr, memop, idx);
+    if (enable_instrumentation) {
+        int size = (1 << (memop & MO_SIZE)) * 8;
+        tmp_size = tcg_const_i32(size);
+        tmp_type = tcg_const_i32(1);
+        tmp_ptr  = tcg_const_ptr(tcg_ctx->cpu);
+        gen_helper_mem_callback(tmp_ptr, addr, tmp_size, tmp_type);
+        tcg_temp_free_i32(tmp_size);
+        tcg_temp_free_i32(tmp_type);
+        tcg_temp_free_ptr(tmp_ptr);
+    }
 }
 
 void tcg_gen_qemu_ld_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
 {
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
+    TCGv_ptr tmp_ptr;
     tcg_gen_req_mo(TCG_MO_LD_LD | TCG_MO_ST_LD);
     if (TCG_TARGET_REG_BITS == 32 && (memop & MO_SIZE) < MO_64) {
         tcg_gen_qemu_ld_i32(TCGV_LOW(val), addr, idx, memop);
@@ -2727,10 +2755,22 @@ void tcg_gen_qemu_ld_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
                                addr, trace_mem_get_info(memop, 0));
     gen_ldst_i64(INDEX_op_qemu_ld_i64, val, addr, memop, idx);
+    if (enable_instrumentation) {
+        int size = (1 << (memop & MO_SIZE)) * 8;
+        tmp_size = tcg_const_i32(size);
+        tmp_type = tcg_const_i32(0);
+        tmp_ptr  = tcg_const_ptr(tcg_ctx->cpu);
+        gen_helper_mem_callback(tmp_ptr, addr, tmp_size, tmp_type);
+        tcg_temp_free_i32(tmp_size);
+        tcg_temp_free_i32(tmp_type);
+        tcg_temp_free_ptr(tmp_ptr);
+    }
 }
 
 void tcg_gen_qemu_st_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
 {
+    TCGv_i32 tmp_size = 0, tmp_type = 0;
+    TCGv_ptr tmp_ptr;
     tcg_gen_req_mo(TCG_MO_LD_ST | TCG_MO_ST_ST);
     if (TCG_TARGET_REG_BITS == 32 && (memop & MO_SIZE) < MO_64) {
         tcg_gen_qemu_st_i32(TCGV_LOW(val), addr, idx, memop);
@@ -2741,6 +2781,16 @@ void tcg_gen_qemu_st_i64(TCGv_i64 val, TCGv addr, TCGArg idx, TCGMemOp memop)
     trace_guest_mem_before_tcg(tcg_ctx->cpu, cpu_env,
                                addr, trace_mem_get_info(memop, 1));
     gen_ldst_i64(INDEX_op_qemu_st_i64, val, addr, memop, idx);
+    if (enable_instrumentation) {
+        int size = (1 << (memop & MO_SIZE)) * 8;
+        tmp_size = tcg_const_i32(size);
+        tmp_type = tcg_const_i32(1);
+        tmp_ptr  = tcg_const_ptr(tcg_ctx->cpu);
+        gen_helper_mem_callback(tmp_ptr, addr, tmp_size, tmp_type);
+        tcg_temp_free_i32(tmp_size);
+        tcg_temp_free_i32(tmp_type);
+        tcg_temp_free_ptr(tmp_ptr);
+    }
 }
 
 static void tcg_gen_ext_i32(TCGv_i32 ret, TCGv_i32 val, TCGMemOp opc)
