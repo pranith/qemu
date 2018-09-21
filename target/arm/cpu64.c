@@ -118,6 +118,13 @@ static void aarch64_tx2_initfn(Object *obj)
     set_feature(&cpu->env, ARM_FEATURE_EL2);
     set_feature(&cpu->env, ARM_FEATURE_EL3);
     set_feature(&cpu->env, ARM_FEATURE_PMU);
+
+    set_feature(&cpu->env, ARM_FEATURE_V8_FP16);
+    cpu->id_aa64pfr0 = deposit64(cpu->id_aa64pfr0, 20, 4, 1);
+
+    set_feature(&cpu->env, ARM_FEATURE_SVE);
+    cpu->id_aa64pfr0 = deposit64(cpu->id_aa64pfr0, 32, 4, 1);
+
     cpu->kvm_target = QEMU_KVM_ARM_TARGET_CORTEX_A57;
     cpu->midr = 0x411fd070;
     cpu->revidr = 0x00000000;
