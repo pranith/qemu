@@ -3832,7 +3832,6 @@ int main(int argc, char **argv, char **envp)
                 qemu_plugin_parse_cmd_args(optarg);
                 break;
 #endif
-            case QEMU_OPTION_nodefconfig:
             case QEMU_OPTION_nouserconfig:
                 /* Nothing to be parsed here. Especially, do not error out below. */
                 break;
