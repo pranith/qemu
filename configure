@@ -403,6 +403,7 @@ EXESUF=""
 DSOSUF=".so"
 LDFLAGS_SHARED="-shared"
 modules="no"
+plugins="no"
 prefix="/usr/local"
 mandir="\${prefix}/share/man"
 datadir="\${prefix}/share"
@@ -1010,6 +1011,12 @@ for opt do
   ;;
   --disable-modules)
       modules="no"
+  ;;
+  --enable-plugins)
+      plugins="yes"
+  ;;
+  --disable-plugins)
+      plugins="no"
   ;;
   --cpu=*)
   ;;
@@ -1753,6 +1760,7 @@ disabled with --disable-FEATURE, default is enabled if available:
   guest-agent-msi build guest agent Windows MSI installation package
   pie             Position Independent Executables
   modules         modules support (non-Windows)
+  plugins         plugins support
   debug-tcg       TCG debugging (default is disabled)
   debug-info      debugging information
   sparse          sparse checker
@@ -3638,7 +3646,7 @@ fi
 
 glib_req_ver=2.40
 glib_modules=gthread-2.0
-if test "$modules" = yes; then
+if test "$modules" = yes || test "$plugins" = yes; then
     glib_modules="$glib_modules gmodule-export-2.0"
 fi
 
@@ -6346,6 +6354,7 @@ if test "$slirp" != "no" ; then
     echo "smbd              $smbd"
 fi
 echo "module support    $modules"
+echo "plugin support    $plugins"
 echo "host CPU          $cpu"
 echo "host big endian   $bigendian"
 echo "target list       $target_list"
@@ -6694,6 +6703,9 @@ if test "$modules" = "yes"; then
   # like as an symbol. So prefix it with an underscore
   echo "CONFIG_STAMP=_$( (echo $qemu_version; echo $pkgversion; cat $0) | $shacmd - | cut -f1 -d\ )" >> $config_host_mak
   echo "CONFIG_MODULES=y" >> $config_host_mak
+fi
+if test "$plugins" = "yes"; then
+  echo "CONFIG_PLUGINS=y" >> $config_host_mak
 fi
 if test "$have_x11" = "yes" && test "$need_x11" = "yes"; then
   echo "CONFIG_X11=y" >> $config_host_mak
