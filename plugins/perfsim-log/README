@@ -1,0 +1,2 @@
+Building: ../configure --enable-plugins --target-list=aarch64-softmmu
+Running: qemu-system-aarch64 -plugin file=<path to exec-log.so> <args>
