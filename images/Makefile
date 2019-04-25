@@ -1,4 +1,4 @@
-PATHS=/lustre/workspace/archcommon/ubuntu_qemu_image
+PATHS=/lustre/workspace/archcommon/ubuntu_qemu_image /t99/cadv21/archcommon/ubuntu_qemu_image
 IMAGES=ubuntu.qcow2 vmlinuz-5.0.0-8-generic initrd.img-5.0.0-8-generic
 #Assume only one of the paths is valid
 IMGHOME:= $(wildcard $(PATHS))
