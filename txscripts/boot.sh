@@ -1,4 +1,4 @@
-../relbuild/aarch64-softmmu/qemu-system-aarch64 \
+../build/aarch64-softmmu/qemu-system-aarch64 \
                 -m 4096M -M virt,gic-version=3 -cpu max \
                 -global virtio-blk-device.scsi=off \
                 -device virtio-scsi-device,id=scsi -drive file=../images/ubuntu.qcow2,id=coreimg,cache=unsafe,if=none \
