@@ -126,7 +126,7 @@ void helper_before_insn(target_ulong pc, void *cpu)
 void helper_mem_callback(void *cpu, uint64_t addr,
                          uint32_t size, uint32_t type)
 {
-    fprintf(stderr, "addr: %lx, size: %d, type: %d\n", addr, size, type);
+    //fprintf(stderr, "addr: %lx, size: %d, type: %d\n", addr, size, type);
     QemuPluginInfo *info;
     QLIST_FOREACH(info, &qemu_plugins, next) {
         info->after_mem(cpu, addr, size, type);

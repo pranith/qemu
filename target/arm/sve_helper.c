@@ -4243,13 +4243,14 @@ static void sve_ld1_r(CPUARMState *env, void *vg, const target_ulong addr,
          * But even then we have still made forward progress.
          */
         tlb_fn(env, &scratch, reg_off, addr + mem_off, oi, retaddr);
+        helper_cond_mem_callback(arm_env_get_cpu(env), addr + mem_off, (1 << msz), 0);
         reg_off += 1 << esz;
     }
 #endif
 
     clear_helper_retaddr();
     memcpy(vd, &scratch, reg_max);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr, reg_max, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr, reg_max, 0);
 }
 
 #define DO_LD1_1(NAME, ESZ) \
@@ -4316,6 +4317,7 @@ static void sve_ld2_r(CPUARMState *env, void *vg, target_ulong addr,
             if (pg & 1) {
                 tlb_fn(env, &scratch[0], i, addr, oi, ra);
                 tlb_fn(env, &scratch[1], i, addr + size, oi, ra);
+                helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
             }
             i += size, pg >>= size;
             addr += 2 * size;
@@ -4326,8 +4328,8 @@ static void sve_ld2_r(CPUARMState *env, void *vg, target_ulong addr,
     /* Wait until all exceptions have been raised to write back.  */
     memcpy(&env->vfp.zregs[rd], &scratch[0], oprsz);
     memcpy(&env->vfp.zregs[(rd + 1) & 31], &scratch[1], oprsz);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr+size, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr+size, oprsz, 0);
 }
 
 static void sve_ld3_r(CPUARMState *env, void *vg, target_ulong addr,
@@ -4347,6 +4349,7 @@ static void sve_ld3_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, &scratch[0], i, addr, oi, ra);
                 tlb_fn(env, &scratch[1], i, addr + size, oi, ra);
                 tlb_fn(env, &scratch[2], i, addr + 2 * size, oi, ra);
+                helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
             }
             i += size, pg >>= size;
             addr += 3 * size;
@@ -4358,9 +4361,9 @@ static void sve_ld3_r(CPUARMState *env, void *vg, target_ulong addr,
     memcpy(&env->vfp.zregs[rd], &scratch[0], oprsz);
     memcpy(&env->vfp.zregs[(rd + 1) & 31], &scratch[1], oprsz);
     memcpy(&env->vfp.zregs[(rd + 2) & 31], &scratch[2], oprsz);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr+size, oprsz, 0);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*size, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr+size, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*size, oprsz, 0);
 }
 
 static void sve_ld4_r(CPUARMState *env, void *vg, target_ulong addr,
@@ -4381,6 +4384,7 @@ static void sve_ld4_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, &scratch[1], i, addr + size, oi, ra);
                 tlb_fn(env, &scratch[2], i, addr + 2 * size, oi, ra);
                 tlb_fn(env, &scratch[3], i, addr + 3 * size, oi, ra);
+                helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
             }
             i += size, pg >>= size;
             addr += 4 * size;
@@ -4393,10 +4397,10 @@ static void sve_ld4_r(CPUARMState *env, void *vg, target_ulong addr,
     memcpy(&env->vfp.zregs[(rd + 1) & 31], &scratch[1], oprsz);
     memcpy(&env->vfp.zregs[(rd + 2) & 31], &scratch[2], oprsz);
     memcpy(&env->vfp.zregs[(rd + 3) & 31], &scratch[3], oprsz);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr+size, oprsz, 0);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*size, oprsz, 0);
-    helper_cond_mem_callback(arm_env_get_cpu(env), addr+3*size, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr+size, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*size, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), addr+3*size, oprsz, 0);
 }
 
 #define DO_LDN_1(N) \
@@ -4782,7 +4786,7 @@ static void sve_st2_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, d1, i, addr, oi, ra);
                 tlb_fn(env, d2, i, addr + msize, oi, ra);
                 helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 1);
-                helper_cond_mem_callback(arm_env_get_cpu(env), addr+msize, oprsz, 1);
+                //helper_cond_mem_callback(arm_env_get_cpu(env), addr+msize, oprsz, 1);
             }
             i += esize, pg >>= esize;
             addr += 2 * msize;
@@ -4812,8 +4816,8 @@ static void sve_st3_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, d2, i, addr + msize, oi, ra);
                 tlb_fn(env, d3, i, addr + 2 * msize, oi, ra);
                 helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 1);
-                helper_cond_mem_callback(arm_env_get_cpu(env), addr+msize, oprsz, 1);
-                helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*msize, oprsz, 1);
+                //helper_cond_mem_callback(arm_env_get_cpu(env), addr+msize, oprsz, 1);
+                //helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*msize, oprsz, 1);
             }
             i += esize, pg >>= esize;
             addr += 3 * msize;
@@ -4845,9 +4849,9 @@ static void sve_st4_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, d3, i, addr + 2 * msize, oi, ra);
                 tlb_fn(env, d4, i, addr + 3 * msize, oi, ra);
                 helper_cond_mem_callback(arm_env_get_cpu(env), addr, oprsz, 1);
-                helper_cond_mem_callback(arm_env_get_cpu(env), addr+msize, oprsz, 1);
-                helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*msize, oprsz, 1);
-                helper_cond_mem_callback(arm_env_get_cpu(env), addr+3*msize, oprsz, 1);
+                //helper_cond_mem_callback(arm_env_get_cpu(env), addr+msize, oprsz, 1);
+                //helper_cond_mem_callback(arm_env_get_cpu(env), addr+2*msize, oprsz, 1);
+                //helper_cond_mem_callback(arm_env_get_cpu(env), addr+3*msize, oprsz, 1);
             }
             i += esize, pg >>= esize;
             addr += 4 * msize;
@@ -4957,6 +4961,7 @@ static void sve_ld1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
             if (likely(pg & 1)) {
                 target_ulong off = off_fn(vm, i);
                 tlb_fn(env, &scratch, i, base + (off << scale), oi, ra);
+                helper_cond_mem_callback(arm_env_get_cpu(env), base, oprsz, 0);
             }
             i += 4, pg >>= 4;
         } while (i & 15);
@@ -4965,7 +4970,7 @@ static void sve_ld1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
 
     /* Wait until all exceptions have been raised to write back.  */
     memcpy(vd, &scratch, oprsz);
-    helper_cond_mem_callback(arm_env_get_cpu(env), base, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), base, oprsz, 0);
 }
 
 static void sve_ld1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
@@ -4983,13 +4988,14 @@ static void sve_ld1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
         if (likely(pg & 1)) {
             target_ulong off = off_fn(vm, i * 8);
             tlb_fn(env, &scratch, i * 8, base + (off << scale), oi, ra);
+            helper_cond_mem_callback(arm_env_get_cpu(env), base, oprsz, 0);
         }
     }
     clear_helper_retaddr();
 
     /* Wait until all exceptions have been raised to write back.  */
     memcpy(vd, &scratch, oprsz * 8);
-    helper_cond_mem_callback(arm_env_get_cpu(env), base, oprsz, 0);
+    //helper_cond_mem_callback(arm_env_get_cpu(env), base, oprsz, 0);
 }
 
 #define DO_LD1_ZPZ_S(MEM, OFS) \

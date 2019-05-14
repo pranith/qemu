@@ -4,19 +4,23 @@
 
 #include "plugins.h"
 
-static char *trace_path = NULL;
-const uint64_t MAX_TRACE_LENGTH = 10000000000ull;
+static char *DEFAULT_PATH = "trace-s0.txt";
+static uint64_t MAX_TRACE_LENGTH = 1000000000ull;
 static uint64_t trace_length = 0ull;
 static uint64_t inst_count = 0ull;
 static FILE *trace = NULL;
+static uint8_t start_seen = 0;
+static uint64_t startpc = 0;
 
 bool plugin_init(const char *args)
 {
+    char *trace_path = NULL;
     char *trace_length_str = NULL;
+    char *startpc_str = NULL;
 
     trace_path = getenv("TRACEPATH");
     if (trace_path == NULL) {
-        trace_path = "trace-s0.txt";
+        trace_path = DEFAULT_PATH;
     }
 
     trace_length_str = getenv("TRACELENGTH");
@@ -27,6 +31,17 @@ bool plugin_init(const char *args)
         trace_length = atoll(trace_length_str);
     }
 
+    startpc_str = getenv("STARTPC");
+    if (startpc_str == NULL) {
+	start_seen = 1;
+    }
+    else {
+	startpc = strtol(startpc_str, NULL, 16);
+        if (startpc == 0) {
+	    start_seen = 1;
+        }
+    }
+
     if (trace_length) {
         trace = fopen(trace_path, "w");
         if (trace == NULL) {
@@ -34,6 +49,7 @@ bool plugin_init(const char *args)
 	    return false;
         }
     }
+
     return true;
 }
 
@@ -66,6 +82,9 @@ void plugin_after_mem(void *cpu, uint64_t v, int size, int type)
 void inst_cb(int c, uint64_t v, uint64_t p, uint8_t l,
              const uint8_t *b)
 {
+    if (!start_seen && (v == startpc)) start_seen = 1;
+    if (!start_seen) return;
+
     //fprintf(stderr, "executing instruction at pc: %lx\n", v);
     if (inst_count < trace_length && trace) {
         fprintf(trace, "user=%d\n", (v >= 0xffff000000000000));
@@ -81,6 +100,8 @@ void inst_cb(int c, uint64_t v, uint64_t p, uint8_t l,
 
 void mem_cb(int c, uint64_t v, uint64_t p, int size, int w)
 {
+    if (!start_seen) return;
+
     //fprintf(stderr, "core: %d, vaddr: %lx, paddr: %lx, \
     //                 size: %d, write: %d\n", c, v, p, size, w);
 
