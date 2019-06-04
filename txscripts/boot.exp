@@ -34,3 +34,5 @@ expect ":~$ "
 
 send "ls /mnt\n"
 expect ":~$ "
+
+interact +++ return
