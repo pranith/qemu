@@ -1,0 +1,155 @@
+Steps for Generating traces using this (slightly customized) version of QEMU. 
+
+1. Build QEMU:
+	$ cd <QEMUROOT>
+	(<QEMUROOT> is the path to the QEMU repo you cloned)
+	$ mkdir build
+	$ cd build
+	$ ../configure --target-list=aarch64-softmmu --enable-plugins --enable-virtfs
+	$  make 
+
+2. Build plugin for trace generation:
+   	$ cd <QEMUROOT>/plugins/perfsim-log
+	$ make
+
+3. Preparing the application for tracing:
+	
+There are two methods to enable and disable tracing: the first is
+faster, but it requires access to aarch64 compiler as well as
+modification on the application's source code. If you don't have
+access to the application's source code, or don't have aarch64
+compiler, you have to follow Method 2. If you do, stick to Method 1 as
+it is faster.
+
+Method 1) Application instrumentation
+
+       1. Include the header file "qsim_magic.h" from the path
+       "<QEMUROOT>/qsim-tools/src/" in your application's source code
+       where the region of interest is.
+       
+       2. Encapsulate the region of interest in the application with
+          "qsim_magic_enable()" and "qsim_magic_disable()" function
+          calls. "qsim_magic_enable()" starts tracing, and
+          "qsim_magic_disable()" ends tracing.
+
+Method 2) Trace start/stop from the guest command line.
+
+        There are binaries you can use to run on the QEMU guest to
+        enable and disable tracing: "qsim-enable" to enable tracing
+        and "qsim-disable" to disable tracing. Pre-built aarch64
+        binaries for "qsim-enable" and "qsim-disable" are included in
+        "<QEMUROOT>/qsim-tools/" directory. Note that qsim-enable tool
+        executes qsim_magic_enable() and qsim-disable tool executes
+        qsim_magic_disable().
+
+	Again, these tools are needed only if you don't have access to
+	aarch64 compiler or are unable to modify the application
+	source code to include qsim_magic_enable() and
+	qsim_magic_disable() calls.
+
+3. Place application and any input files (and qsim-enable and
+qsim-disable tools, if needed) in a single directory.
+
+4. Update boot script:
+
+	Open txscripts/boot.exp for editing and update/correct:
+	     Line 1 - Assumes you have a working copy of the expect tool.  Likely need to update line 1 to point to it.
+	     Line 7  - path to qemu-system-aarch64 located in <QEMUROOT>/build/aarch64-softmmu/ directory.
+	     Line 8  - size of guest memory, currently set to 4096M (run <QEMUROOT>/build/aarch64-softmmu/qemu-system-aarch64 --help for more details).
+	     Line 11 - path to ubuntu.qcow2 (or replace current path with path to disk image you have built).
+	     Line 13 - paths to vmlinuz-5.0.0-8-generic and initrd.img-5.0.0-8-generic.
+	     Line 15 - path to perfsim-log.so located in
+             <QEMUROOT>/plugins/perfsim-log; and path to directory
+             containing application binary and input files, currently
+             this is set to "/lustre/workspace/archcommon/". Contents
+             of this directory will be available on QEMU guest under
+             /mnt .
+
+         The boot script uses a login account that has both username
+         and password set to ubuntu. Update script (lines 22, 25, 31)
+         if that is not the case. Occasionally, there is a need to
+         include and additional cntrl-D keystroke before the login
+         prompt. If necessary, uncomment those lines from the expect
+         script.
+
+5. Running and Tracing:
+
+         Two environment variables - TRACEPATH and TRACELENGTH - are
+         used to specify the full path and the length of the trace to
+         be generated. If these are not set, "trace-s0.txt" and 1B are
+         used for the location and length of the trace. A third
+         environment variable - STARTPC - is used to specify the PC
+         value starting from which tracing will be done. When
+         specifying STARTPC, set it to the hex value of the PC
+         starting from which you want the trace file to be
+         written. For example, on bash you can run "export
+         STARTPC=0x4009f0" or "export STARTPC=4009f0" if you want
+         tracing to be done starting from PC 0x4009f0 . If STARTPC is
+         not specified, trace file is written from when
+         qsim_magic_enable() is called. Note that qsim-enable tool
+         executes qsim_magic_enable() and qsim-disable tool executes
+         qsim_magic_disable().
+
+	 A. Run txscripts/boot.exp by typing "./boot.exp" and wait until script logs you in. 
+	 B. On QEMU guest console, $cd /mnt
+         C. If boot script was updated correctly you should see the application binary and inputs (and qsim-enable and qsim-disable tools) under /mnt)
+	 D. Running:
+
+            To run the application (if application binary includes qsim_magic_enable() and qsim_magic_disable() calls):
+
+	     i) Run application binary. Tracing starts when
+                qsim_magic_enable() is executed. The message "Enabling
+                instrumentation" is printed on the console when
+                qsim_magic_enable() is executed.
+
+	     ii) Trace collections stops when the first of two events
+                  happens - either the specified number of
+                  instructions have been traced or
+                  qsim_magic_disable() function is executed by the
+                  application. The message "Disabling instrumentation"
+                  is printed on the console when qsim_magic_disable()
+                  is executed.
+
+
+          To run the application (if application binary does NOT include "qsim_magic_enable()" and "qsim_magic_disable()"):
+	 	i)   Run "qsim-enable" tool. 
+
+		ii) Run application binary. If STARTPC was set,
+                     tracing will start from when STARTPC is seen,
+                     otherwise tracing starts when qsim-enable is
+                     run. Tracing will stop when either the specified
+                     number of instructions have been traced or when
+                     "qsim-disable" tool is run. To run qsim-disable
+                     tool while the application is running, ssh into
+                     guest with "ssh -p 2223 <username>@localhost" and
+                     then run qsim-disable.
+
+		Note that this approach can be quite slow depending on how far into the application STARTPC occurs.
+
+	E. After tracing is complete, shutdown guest by running "sudo
+	poweroff". Enter password when prompted. The trace file will
+	be available at path specified by TRACEPATH.
+
+
+====================
+
+
+Sketch of creating a boot image from scratch:
+
+QEMU=/path/to/qemu-system-aarch64
+QEMU_IMG=/path/to/qemu-img
+CPU=cortex-a57
+MACHINE=virt
+
+mkdir ubuntu_disk
+cd ubuntu_disk
+wget -c http://ports.ubuntu.com/ubuntu-ports/dists/disco/main/installer-arm64/current/images/netboot/netboot.tar.gz
+tar -xvf netboot.tar.gz
+
+$QEMU_IMG create -f qcow2 ubuntu.qcow2 16G
+
+$QEMU -cpu $CPU -M $MACHINE -m 2048 -drive if=virtio,file=ubuntu.qcow2 \
+      -kernel ubuntu-installer/arm64/linux \
+      -initrd ubuntu-installer/arm64/initrd.gz 
+
+You need to copy the /boot/vmlinuz and /boot/initrd.img from the guest VM after the installation is done.
