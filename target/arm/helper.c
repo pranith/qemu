@@ -1713,31 +1713,6 @@ static uint64_t pmevtyper_read(CPUARMState *env, const ARMCPRegInfo *ri,
     }
 }
 
-bool enable_instrumentation = false;
-
-static void pmuserenr_write(CPUARMState *env, const ARMCPRegInfo *ri,
-                            uint64_t value)
-{
-    ARMCPU *cpu = arm_env_get_cpu(env);
-    CPUState *cs = CPU(cpu);
-
-    if (value == 0xaaaaaaaa) {
-        printf("Enabling instrumentation\n");
-        enable_instrumentation = true;
-        tb_flush(cs);
-    } else if (value == 0xfa11dead) {
-        printf("Disabling instrumentation\n");
-        enable_instrumentation = false;
-        tb_flush(cs);
-    }
-
-    if (arm_feature(env, ARM_FEATURE_V8)) {
-        env->cp15.c9_pmuserenr = value & 0xf;
-    } else {
-        env->cp15.c9_pmuserenr = value & 1;
-    }
-}
-
 static void pmevtyper_writefn(CPUARMState *env, const ARMCPRegInfo *ri,
                               uint64_t value)
 {
@@ -1855,9 +1830,23 @@ static uint64_t pmxevcntr_read(CPUARMState *env, const ARMCPRegInfo *ri)
     return pmevcntr_read(env, ri, env->cp15.c9_pmselr & 31);
 }
 
+bool enable_instrumentation = false;
+
 static void pmuserenr_write(CPUARMState *env, const ARMCPRegInfo *ri,
                             uint64_t value)
 {
+    CPUState *cs = env_cpu(env);
+
+    if (value == 0xaaaaaaaa) {
+        printf("Enabling instrumentation\n");
+        enable_instrumentation = true;
+        tb_flush(cs);
+    } else if (value == 0xfa11dead) {
+        printf("Disabling instrumentation\n");
+        enable_instrumentation = false;
+        tb_flush(cs);
+    }
+
     if (arm_feature(env, ARM_FEATURE_V8)) {
         env->cp15.c9_pmuserenr = value & 0xf;
     } else {
