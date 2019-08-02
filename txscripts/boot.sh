@@ -6,4 +6,5 @@
                 -device scsi-hd,drive=coreimg -netdev user,id=unet,hostfwd=tcp::2223-:22 \
                 -device virtio-net-device,netdev=unet -kernel ../images/vmlinuz-5.0.0-8-generic -initrd ../images/initrd.img-5.0.0-8-generic -display sdl -nographic \
                 -append "root=/dev/sda2 lpj=34920500 notsc nowatchdog rcupdate.rcu_cpu_stall_suppress=1" \
+		-icount 1,align=off,shift=3,sleep=off -rtc "clock=vm"
                 -plugin "file=../plugins/perfsim-log/perfsim-log.so"
