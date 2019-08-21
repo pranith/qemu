@@ -1,5 +1,6 @@
 Steps for Generating traces using this (slightly customized) version of QEMU. 
 
+0. You can run the script ./txscripts/build.sh instead of steps 1 and 2.
 1. Build QEMU:
 	$ cd <QEMUROOT>
 	(<QEMUROOT> is the path to the QEMU repo you cloned)
