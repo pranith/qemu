@@ -4,7 +4,7 @@
 set timeout -1
 
 spawn ../build/aarch64-softmmu/qemu-system-aarch64 \
-                -m 4096M -M virt,gic-version=3 -cpu max \
+                -m 64G -M virt,gic-version=3 -cpu max \
                 -global virtio-blk-device.scsi=off \
                 -device virtio-scsi-device,id=scsi \
                 -drive file=../images/ubuntu.qcow2,snapshot=on,id=coreimg,cache=unsafe,if=none,format=qcow2 \
@@ -13,7 +13,7 @@ spawn ../build/aarch64-softmmu/qemu-system-aarch64 \
                 -append "root=/dev/sda2 lpj=34920500 notsc nowatchdog rcupdate.rcu_cpu_stall_suppress=1" \
                 -icount align=off,shift=4,sleep=on -rtc "clock=vm" \
                 -plugin "file=../plugins/perfsim-log/perfsim-log.so" \
-                -fsdev local,id=p9test,path=/t99/cadv21/archcommon/qemu_mnt,security_model=none -device virtio-9p-pci,fsdev=p9test,mount_tag=test_mount
+                -fsdev local,id=p9test,path=/workspace/umathur/qsim_bmarks,security_model=none -device virtio-9p-pci,fsdev=p9test,mount_tag=test_mount
 
 
 # Start the guest VM
@@ -51,5 +51,14 @@ expect ":~$ "
 
 send "ls /mnt\n"
 expect ":~$ "
+
+#send "sleep 300\n"
+#expect ":~$ "
+
+send "cd /mnt\n"
+expect "$ "
+
+#send "./loop; ./loop; ./loop; ./loop\n"
+#expect "$ "
 
 interact +++ return

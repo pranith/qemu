@@ -41,3 +41,34 @@ int qemulib_get_cpuid(void *cpu)
 
     return cs ? cs->cpu_index : -1;
 }
+
+// NOTE: ARM specific function; cannot be generalized
+uint32_t qemulib_get_current_el(void *cpu)
+{
+
+//#if TARGET_BASE_ARCH != arm
+//    assert(0 && "Building illegal target base");
+//#endif
+
+    CPUState *cs = CPU(cpu);
+    ARMCPU *arm_cpu = ARM_CPU(cs);
+
+    assert( arm_cpu );
+    return arm_cpu ? arm_current_el(&(arm_cpu->env)) : -1;
+}
+
+// NOTE: ARM specific function; cannot be generalized
+uint32_t qemulib_get_tid(void *cpu, uint32_t el)
+{
+
+//#if TARGET_BASE_ARCH != arm
+//    assert(0 && "Building illegal target base");
+//#endif
+
+    CPUState *cs = CPU(cpu);
+    ARMCPU *arm_cpu = ARM_CPU(cs);
+
+    assert( arm_cpu );
+    assert( el != -1 );
+    return arm_cpu ? arm_cpu->env.cp15.contextidr_el[el] : -1;
+}
