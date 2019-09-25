@@ -221,7 +221,7 @@ void bbv_dump(FILE *bb_logfile, FILE *bb_intervalfile, uint64_t bbv_interval_use
     for( i = 0; i < live_bb_count; i++ ){
         if (basic_block_vector[i].freq) {
             // Dump and clear the basic block
-            fprintf(bb_logfile, ":%"PRId64":%"PRId64" ", basic_block_vector[i].bbentry_pc, basic_block_vector[i].freq);
+            fprintf(bb_logfile, ":%"PRId64":%"PRId64" ", basic_block_vector[i].bbentry_pc, (basic_block_vector[i].freq) * (basic_block_vector[i].size));
         }
         basic_block_vector[i].bbentry_pc = 0x0;
         basic_block_vector[i].bbexit_pc  = 0x0;
@@ -278,8 +278,7 @@ int bbv_find_array_entry(uint64_t bbentry_pc){
         if( (basic_block_vector[last_entry].bbentry_pc <= bbentry_pc) && (bbentry_pc <= basic_block_vector[last_entry].bbexit_pc) ){
             return(last_entry);
         }
-    }
-    else{
+    } else{
         last_entry = -1;
     }
     // Running inverted loop as we might break early due to temporal locality
@@ -295,13 +294,22 @@ int bbv_find_array_entry(uint64_t bbentry_pc){
 
 #define BBV_PC_IN_RANGE( pc, startpc, endpc ) ( (startpc) <= (pc) && (pc) <= (endpc) )
 int bbv_find_endpoints(uint64_t start_pc, uint64_t end_pc, uint64_t *start_id, uint64_t *end_id){
-    static int last_entry = -1;
-    unsigned int i;
+    static int last_hidden_entry = -1;
+    int i;
 
     *start_id = -1;
     *end_id = -1;
 
-    for( i = 0; i < live_bb_count && ( *start_id == -1 || *end_id == -1 ); i++ ){
+    if( (last_hidden_entry != -1) && (last_hidden_entry < live_bb_count)){
+        if( (basic_block_vector[last_hidden_entry].bbentry_pc > start_pc) && (basic_block_vector[last_hidden_entry].bbexit_pc < end_pc) ){
+            return(last_hidden_entry);
+        }
+    } else{
+        last_hidden_entry = -1;
+    }
+
+    // Running inverted loop as we might break early due to temporal locality
+    for( i = live_bb_count - 1; i >= 0 && ( *start_id == -1 || *end_id == -1 ); i-- ){
         uint64_t bbstart =  basic_block_vector[i].bbentry_pc;
         uint64_t bbend =  basic_block_vector[i].bbexit_pc;
 
@@ -320,9 +328,10 @@ int bbv_find_endpoints(uint64_t start_pc, uint64_t end_pc, uint64_t *start_id, u
 }
 
 unsigned int bbv_create_array_entry(uint64_t bbentry_pc, FILE* bb_debugfile){
-    int prev_entry = bbv_find_array_entry(bbentry_pc) ;
+    // UM: removing this due to performance reasons
+    //int prev_entry = bbv_find_array_entry(bbentry_pc) ;
 
-    BBV_ERR(prev_entry == -1, "create_bb_array_entry(): Found previous entry at: %d for %#lx\n",prev_entry,bbentry_pc);
+    //BBV_ERR(prev_entry == -1, "create_bb_array_entry(): Found previous entry at: %d for %#lx\n",prev_entry,bbentry_pc);
 
     //create new entry
     CHECK_BBV_IDX_LIMIT(live_bb_count);

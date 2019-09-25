@@ -114,30 +114,37 @@ bool plugin_needs_before_insn(uint64_t pc, void *cpu){
 
 void plugin_before_insn(uint64_t pc, void *cpu){
     uint8_t inst_buffer[4];
-
-    qemulib_read_memory(cpu, pc, inst_buffer, sizeof(uint32_t));
     uint32_t el = qemulib_get_current_el(cpu);
-    inst_cb(qemulib_get_cpuid(cpu), el, qemulib_get_tid(cpu, el), pc, qemulib_translate_memory(cpu, pc),
-            sizeof(uint32_t), inst_buffer);
-}
+    uint32_t tid = qemulib_get_tid(cpu, el);
 
-void plugin_after_mem(void *cpu, uint64_t v, int size, int type){
-    uint32_t el = qemulib_get_current_el(cpu);
-    mem_cb(qemulib_get_cpuid(cpu), el, qemulib_get_tid(cpu, el), v,
-            qemulib_translate_memory(cpu, v), size, type);
-}
-
-void inst_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t pc_va, uint64_t pc_pa, uint8_t insn_len, const uint8_t *insn_buff){
-    if (!start_seen && (pc_va == startpc)) {
+    if (!start_seen && (pc == startpc)) {
         if(track_tid){
             tracked_tid = tid;
-            printf("Starting PC seen at EL%d: %#lx with TID: %ld\n", el, pc_va, tracked_tid);
+            printf("Starting PC seen at EL%d: %#lx with TID: %ld\n", el, pc, tracked_tid);
         } else{
-            printf("Starting PC seen at EL%d: %#lx\n", el, pc_va);
+            printf("Starting PC seen at EL%d: %#lx\n", el, pc);
         }
         inst_count = 0;
         start_seen = 1;
     }
+
+    if( plugin_mode == PLUGIN_MODE_TRACING ){ 
+        if(!simpoints_before_inst_cb(el) || simpoints_complete()) return;
+        qemulib_read_memory(cpu, pc, inst_buffer, sizeof(uint32_t));
+    }
+    inst_cb(/*qemulib_get_cpuid(cpu)*/0, el, tid, pc, /*qemulib_translate_memory(cpu, pc)*/0,
+            sizeof(uint32_t), inst_buffer);
+}
+
+void plugin_after_mem(void *cpu, uint64_t v, int size, int type){
+    if( plugin_mode != PLUGIN_MODE_TRACING ) return;
+    if( !simpoints_before_mem_cb() || simpoints_complete() ) return;
+    uint32_t el = 0;//qemulib_get_current_el(cpu);
+    mem_cb(/*qemulib_get_cpuid(cpu)*/0, el, qemulib_get_tid(cpu, el), v,
+            qemulib_translate_memory(cpu, v), size, type);
+}
+
+void inst_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t pc_va, uint64_t pc_pa, uint8_t insn_len, const uint8_t *insn_buff){
     if (!start_seen) return;
 
     bool log_inst = (!track_tid || (track_tid && tracked_tid == tid));
@@ -145,7 +152,7 @@ void inst_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t pc_va, uint64_t pc_
 
     // TODO: Opportunity for optimization - we don't need all 32 bits to decode; can probably
     // work with insn_buff[3]?
-    uint32_t insn = (insn_buff[3] << 24) | (insn_buff[2] << 16) | (insn_buff[1] << 8) | insn_buff[0];
+    uint32_t insn;// = (insn_buff[3] << 24) | (insn_buff[2] << 16) | (insn_buff[1] << 8) | insn_buff[0];
 
     switch( plugin_mode ){
         case PLUGIN_MODE_BBV_GEN: {
@@ -157,7 +164,7 @@ void inst_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t pc_va, uint64_t pc_
                                           bb_start_pc = pc_va;
                                       }
 
-                                      if( (bb_prev_pc != -1) && (plugin_is_branch(prev_insn, &term_cond) || (pc_va != (bb_prev_pc + 0x4))) ){
+                                      if( (bb_prev_pc != -1) && (/*plugin_is_branch(prev_insn, &term_cond) ||*/ (pc_va != (bb_prev_pc + 0x4))) ){
                                           bbv_commit(bb_start_pc, bb_prev_pc, term_cond, bb_insns, bb_debug_file);
 
                                           // On reaching a term condition, reset the tracked bbv
@@ -210,9 +217,7 @@ void mem_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t va, uint64_t pa, int
     bool log_inst = (!track_tid || (track_tid && tracked_tid == tid));
     if( !log_inst ) return;
 
-    if( plugin_mode == PLUGIN_MODE_TRACING ){
-        simpoints_mem_cb(va, pa);
-    }
+    simpoints_mem_cb(va, pa);
 }
 
 inline char *plugin_helper_str_default( char *input_str, char *default_str ){
@@ -269,7 +274,7 @@ bool plugin_update_env(){
     switch( plugin_mode ){
         case PLUGIN_MODE_TRACING:
             printf("Pluin mode: Tracing\n");
-            simpoints_trace_init(simpt_samples);
+            simpoints_trace_init(simpt_samples, bbv_interval);
             break;
         case PLUGIN_MODE_BBV_GEN:
             {
