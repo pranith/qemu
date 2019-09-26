@@ -4178,6 +4178,8 @@ static void sve_ld1_r(CPUARMState *env, void *vg, const target_ulong addr,
     if (unlikely(reg_off == reg_max)) {
         /* The entire predicate was false; no load occurs.  */
         memset(vd, 0, reg_max);
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, (1 << msz), 0);
         return;
     }
     mem_off = reg_off >> diffsz;
@@ -4199,6 +4201,8 @@ static void sve_ld1_r(CPUARMState *env, void *vg, const target_ulong addr,
             clear_helper_retaddr();
             /* After having taken any fault, zero leading inactive elements. */
             swap_memzero(vd, reg_off);
+            /* Need a callback for this early-out condition */
+            helper_cond_mem_callback(env_cpu(env), addr, (1 << msz), 0);
             return;
         }
     }
@@ -4309,6 +4313,8 @@ static void sve_ld2_r(CPUARMState *env, void *vg, target_ulong addr,
     const unsigned rd = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 5);
     intptr_t i, oprsz = simd_oprsz(desc);
     ARMVectorReg scratch[2] = { };
+    target_ulong base_addr = addr;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4317,7 +4323,8 @@ static void sve_ld2_r(CPUARMState *env, void *vg, target_ulong addr,
             if (pg & 1) {
                 tlb_fn(env, &scratch[0], i, addr, oi, ra);
                 tlb_fn(env, &scratch[1], i, addr + size, oi, ra);
-                helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+                //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+                entire_pred_false = false;
             }
             i += size, pg >>= size;
             addr += 2 * size;
@@ -4328,7 +4335,13 @@ static void sve_ld2_r(CPUARMState *env, void *vg, target_ulong addr,
     /* Wait until all exceptions have been raised to write back.  */
     memcpy(&env->vfp.zregs[rd], &scratch[0], oprsz);
     memcpy(&env->vfp.zregs[(rd + 1) & 31], &scratch[1], oprsz);
-    //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base_addr, oprsz, 0);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 0);
+    }
     //helper_cond_mem_callback(env_cpu(env), addr+size, oprsz, 0);
 }
 
@@ -4340,6 +4353,8 @@ static void sve_ld3_r(CPUARMState *env, void *vg, target_ulong addr,
     const unsigned rd = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 5);
     intptr_t i, oprsz = simd_oprsz(desc);
     ARMVectorReg scratch[3] = { };
+    target_ulong base_addr = addr;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4349,7 +4364,8 @@ static void sve_ld3_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, &scratch[0], i, addr, oi, ra);
                 tlb_fn(env, &scratch[1], i, addr + size, oi, ra);
                 tlb_fn(env, &scratch[2], i, addr + 2 * size, oi, ra);
-                helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+                //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+                entire_pred_false = false;
             }
             i += size, pg >>= size;
             addr += 3 * size;
@@ -4361,7 +4377,13 @@ static void sve_ld3_r(CPUARMState *env, void *vg, target_ulong addr,
     memcpy(&env->vfp.zregs[rd], &scratch[0], oprsz);
     memcpy(&env->vfp.zregs[(rd + 1) & 31], &scratch[1], oprsz);
     memcpy(&env->vfp.zregs[(rd + 2) & 31], &scratch[2], oprsz);
-    //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base_addr, oprsz, 0);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 0);
+    }
     //helper_cond_mem_callback(env_cpu(env), addr+size, oprsz, 0);
     //helper_cond_mem_callback(env_cpu(env), addr+2*size, oprsz, 0);
 }
@@ -4374,6 +4396,8 @@ static void sve_ld4_r(CPUARMState *env, void *vg, target_ulong addr,
     const unsigned rd = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 5);
     intptr_t i, oprsz = simd_oprsz(desc);
     ARMVectorReg scratch[4] = { };
+    target_ulong base_addr = addr;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4384,7 +4408,8 @@ static void sve_ld4_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, &scratch[1], i, addr + size, oi, ra);
                 tlb_fn(env, &scratch[2], i, addr + 2 * size, oi, ra);
                 tlb_fn(env, &scratch[3], i, addr + 3 * size, oi, ra);
-                helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+                //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+                entire_pred_false = false;
             }
             i += size, pg >>= size;
             addr += 4 * size;
@@ -4397,7 +4422,13 @@ static void sve_ld4_r(CPUARMState *env, void *vg, target_ulong addr,
     memcpy(&env->vfp.zregs[(rd + 1) & 31], &scratch[1], oprsz);
     memcpy(&env->vfp.zregs[(rd + 2) & 31], &scratch[2], oprsz);
     memcpy(&env->vfp.zregs[(rd + 3) & 31], &scratch[3], oprsz);
-    //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 0);
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base_addr, oprsz, 0);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 0);
+    }
     //helper_cond_mem_callback(env_cpu(env), addr+size, oprsz, 0);
     //helper_cond_mem_callback(env_cpu(env), addr+2*size, oprsz, 0);
     //helper_cond_mem_callback(env_cpu(env), addr+3*size, oprsz, 0);
@@ -4498,6 +4529,8 @@ static void sve_ldff1_r(CPUARMState *env, void *vg, const target_ulong addr,
     if (unlikely(reg_off == reg_max)) {
         /* The entire predicate was false; no load occurs.  */
         memset(vd, 0, reg_max);
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, reg_off, 0);
         return;
     }
     mem_off = reg_off >> diffsz;
@@ -4519,6 +4552,8 @@ static void sve_ldff1_r(CPUARMState *env, void *vg, const target_ulong addr,
             clear_helper_retaddr();
             /* After any fault, zero any leading inactive elements.  */
             swap_memzero(vd, reg_off);
+            /* Need a callback for this early-out condition */
+            helper_cond_mem_callback(env_cpu(env), addr, reg_off, 0);
             return;
         }
     }
@@ -4596,6 +4631,8 @@ static void sve_ldnf1_r(CPUARMState *env, void *vg, const target_ulong addr,
     reg_off = find_next_active(vg, 0, reg_max, esz);
     if (unlikely(reg_off == reg_max)) {
         /* The entire predicate was false; no load occurs.  */
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, (1 << msz), 0);
         return;
     }
     mem_off = reg_off >> diffsz;
@@ -4631,6 +4668,7 @@ static void sve_ldnf1_r(CPUARMState *env, void *vg, const target_ulong addr,
     }
 #endif
 
+    helper_cond_mem_callback(env_cpu(env), addr, (1 << msz), 0);
     record_fault(env, reg_off, reg_max);
 }
 
@@ -4751,6 +4789,8 @@ static void sve_st1_r(CPUARMState *env, void *vg, target_ulong addr,
     const unsigned rd = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 5);
     intptr_t i, oprsz = simd_oprsz(desc);
     void *vd = &env->vfp.zregs[rd];
+    target_ulong base_addr = addr;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4758,13 +4798,21 @@ static void sve_st1_r(CPUARMState *env, void *vg, target_ulong addr,
         do {
             if (pg & 1) {
                 tlb_fn(env, vd, i, addr, oi, ra);
-                helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
+                //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
+                entire_pred_false = false;
             }
             i += esize, pg >>= esize;
             addr += msize;
         } while (i & 15);
     }
     clear_helper_retaddr();
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base_addr, oprsz, 1);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 1);
+    }
 }
 
 static void sve_st2_r(CPUARMState *env, void *vg, target_ulong addr,
@@ -4777,6 +4825,8 @@ static void sve_st2_r(CPUARMState *env, void *vg, target_ulong addr,
     intptr_t i, oprsz = simd_oprsz(desc);
     void *d1 = &env->vfp.zregs[rd];
     void *d2 = &env->vfp.zregs[(rd + 1) & 31];
+    target_ulong base_addr = addr;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4785,14 +4835,22 @@ static void sve_st2_r(CPUARMState *env, void *vg, target_ulong addr,
             if (pg & 1) {
                 tlb_fn(env, d1, i, addr, oi, ra);
                 tlb_fn(env, d2, i, addr + msize, oi, ra);
-                helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
+                //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
                 //helper_cond_mem_callback(env_cpu(env), addr+msize, oprsz, 1);
+                entire_pred_false = false;
             }
             i += esize, pg >>= esize;
             addr += 2 * msize;
         } while (i & 15);
     }
     clear_helper_retaddr();
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base_addr, oprsz, 1);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 1);
+    }
 }
 
 static void sve_st3_r(CPUARMState *env, void *vg, target_ulong addr,
@@ -4806,6 +4864,8 @@ static void sve_st3_r(CPUARMState *env, void *vg, target_ulong addr,
     void *d1 = &env->vfp.zregs[rd];
     void *d2 = &env->vfp.zregs[(rd + 1) & 31];
     void *d3 = &env->vfp.zregs[(rd + 2) & 31];
+    target_ulong base_addr = addr;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4815,15 +4875,23 @@ static void sve_st3_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, d1, i, addr, oi, ra);
                 tlb_fn(env, d2, i, addr + msize, oi, ra);
                 tlb_fn(env, d3, i, addr + 2 * msize, oi, ra);
-                helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
+                //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
                 //helper_cond_mem_callback(env_cpu(env), addr+msize, oprsz, 1);
                 //helper_cond_mem_callback(env_cpu(env), addr+2*msize, oprsz, 1);
+                entire_pred_false = false;
             }
             i += esize, pg >>= esize;
             addr += 3 * msize;
         } while (i & 15);
     }
     clear_helper_retaddr();
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base_addr, oprsz, 1);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 1);
+    }
 }
 
 static void sve_st4_r(CPUARMState *env, void *vg, target_ulong addr,
@@ -4838,6 +4906,8 @@ static void sve_st4_r(CPUARMState *env, void *vg, target_ulong addr,
     void *d2 = &env->vfp.zregs[(rd + 1) & 31];
     void *d3 = &env->vfp.zregs[(rd + 2) & 31];
     void *d4 = &env->vfp.zregs[(rd + 3) & 31];
+    target_ulong base_addr = addr;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4848,16 +4918,24 @@ static void sve_st4_r(CPUARMState *env, void *vg, target_ulong addr,
                 tlb_fn(env, d2, i, addr + msize, oi, ra);
                 tlb_fn(env, d3, i, addr + 2 * msize, oi, ra);
                 tlb_fn(env, d4, i, addr + 3 * msize, oi, ra);
-                helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
+                //helper_cond_mem_callback(env_cpu(env), addr, oprsz, 1);
                 //helper_cond_mem_callback(env_cpu(env), addr+msize, oprsz, 1);
                 //helper_cond_mem_callback(env_cpu(env), addr+2*msize, oprsz, 1);
                 //helper_cond_mem_callback(env_cpu(env), addr+3*msize, oprsz, 1);
+                entire_pred_false = false;
             }
             i += esize, pg >>= esize;
             addr += 4 * msize;
         } while (i & 15);
     }
     clear_helper_retaddr();
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base_addr, oprsz, 1);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 1);
+    }
 }
 
 #define DO_STN_1(N, NAME, ESIZE) \
@@ -4953,6 +5031,7 @@ static void sve_ld1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
     const int scale = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 2);
     intptr_t i, oprsz = simd_oprsz(desc);
     ARMVectorReg scratch = { };
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -4961,7 +5040,8 @@ static void sve_ld1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
             if (likely(pg & 1)) {
                 target_ulong off = off_fn(vm, i);
                 tlb_fn(env, &scratch, i, base + (off << scale), oi, ra);
-                helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+                //helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+                entire_pred_false = false;
             }
             i += 4, pg >>= 4;
         } while (i & 15);
@@ -4970,7 +5050,13 @@ static void sve_ld1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
 
     /* Wait until all exceptions have been raised to write back.  */
     memcpy(vd, &scratch, oprsz);
-    //helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 0);
+    }
 }
 
 static void sve_ld1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
@@ -4981,6 +5067,7 @@ static void sve_ld1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
     const int scale = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 2);
     intptr_t i, oprsz = simd_oprsz(desc) / 8;
     ARMVectorReg scratch = { };
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; i++) {
@@ -4988,14 +5075,21 @@ static void sve_ld1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
         if (likely(pg & 1)) {
             target_ulong off = off_fn(vm, i * 8);
             tlb_fn(env, &scratch, i * 8, base + (off << scale), oi, ra);
-            helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+            //helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+            entire_pred_false = false;
         }
     }
     clear_helper_retaddr();
 
     /* Wait until all exceptions have been raised to write back.  */
     memcpy(vd, &scratch, oprsz * 8);
-    //helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 0);
+    }
 }
 
 #define DO_LD1_ZPZ_S(MEM, OFS) \
@@ -5173,6 +5267,9 @@ static inline void sve_ldff1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
 
         /* The rest of the reads will be non-faulting.  */
         clear_helper_retaddr();
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, reg_max, 0);
     }
 
     /* After any fault, zero the leading predicated false elements.  */
@@ -5216,6 +5313,9 @@ static inline void sve_ldff1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
 
         /* The rest of the reads will be non-faulting.  */
         clear_helper_retaddr();
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, reg_max, 0);
     }
 
     /* After any fault, zero the leading predicated false elements.  */
@@ -5327,6 +5427,7 @@ static void sve_st1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
     const TCGMemOpIdx oi = extract32(desc, SIMD_DATA_SHIFT, MEMOPIDX_SHIFT);
     const int scale = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 2);
     intptr_t i, oprsz = simd_oprsz(desc);
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; ) {
@@ -5335,12 +5436,20 @@ static void sve_st1_zs(CPUARMState *env, void *vd, void *vg, void *vm,
             if (likely(pg & 1)) {
                 target_ulong off = off_fn(vm, i);
                 tlb_fn(env, vd, i, base + (off << scale), oi, ra);
-                helper_cond_mem_callback(env_cpu(env), base+(off << scale), oprsz, 1);
+                //helper_cond_mem_callback(env_cpu(env), base+(off << scale), oprsz, 1);
+                entire_pred_false = false;
             }
             i += 4, pg >>= 4;
         } while (i & 15);
     }
     clear_helper_retaddr();
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 0);
+    }
 }
 
 static void sve_st1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
@@ -5350,6 +5459,7 @@ static void sve_st1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
     const TCGMemOpIdx oi = extract32(desc, SIMD_DATA_SHIFT, MEMOPIDX_SHIFT);
     const int scale = extract32(desc, SIMD_DATA_SHIFT + MEMOPIDX_SHIFT, 2);
     intptr_t i, oprsz = simd_oprsz(desc) / 8;
+    bool entire_pred_false = true;
 
     set_helper_retaddr(ra);
     for (i = 0; i < oprsz; i++) {
@@ -5357,10 +5467,18 @@ static void sve_st1_zd(CPUARMState *env, void *vd, void *vg, void *vm,
         if (likely(pg & 1)) {
             target_ulong off = off_fn(vm, i * 8);
             tlb_fn(env, vd, i * 8, base + (off << scale), oi, ra);
-            helper_cond_mem_callback(env_cpu(env), base + (off << scale), oprsz, 0);
+            //helper_cond_mem_callback(env_cpu(env), base + (off << scale), oprsz, 0);
+            entire_pred_false = false;
         }
     }
     clear_helper_retaddr();
+
+    if (likely(!entire_pred_false)) {
+        helper_cond_mem_callback(env_cpu(env), base, oprsz, 0);
+    } else {
+        /* Using sentinel address in callback when entire predicate is false */
+        helper_cond_mem_callback(env_cpu(env), 0xBADF12EDBADF12ED, oprsz, 0);
+    }
 }
 
 #define DO_ST1_ZPZ_S(MEM, OFS) \
