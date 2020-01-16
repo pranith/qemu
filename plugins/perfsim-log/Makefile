@@ -15,5 +15,4 @@ all: $(FILES)
 	$(CC) $(LDFLAGS) -o $(BIN) $(FILES)
 
 clean:
-	rm $(FILES)
-	rm $(BIN)
+	rm -rf $(FILES) $(BIN)

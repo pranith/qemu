@@ -411,7 +411,7 @@ void qemu_iovec_init_extended(
         QEMUIOVector *mid_qiov, size_t mid_offset, size_t mid_len,
         void *tail_buf, size_t tail_len)
 {
-    size_t mid_head, mid_tail;
+    size_t mid_head = 0, mid_tail = 0;
     int total_niov, mid_niov = 0;
     struct iovec *p, *mid_iov;
 

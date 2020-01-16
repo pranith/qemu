@@ -58,6 +58,8 @@ static uint64_t inst_count = 0ull;
 static uint64_t interval_inst_count = 0ull;
 static uint8_t start_seen = 0;
 static uint64_t startpc = 0;
+static bool track_encoding = false;
+static uint64_t startencoding = 0;
 
 uint32_t plugin_mode = PLUGIN_MODE_BBV_GEN;
 
@@ -99,6 +101,7 @@ bool plugin_needs_before_insn(uint64_t pc, void *cpu){
     if( !instrumentation_flag ){
         // If in BBV Gen mode, write whatever is left
         if( plugin_mode == PLUGIN_MODE_BBV_GEN ){
+            bbv_commit(bb_start_pc, bb_prev_pc, OTHER, bb_insns, bb_debug_file);
             bbv_dump(bb_log_file, bb_interval_file, interval_inst_count);
             fclose(bb_log_file);
             fclose(bb_interval_file);
@@ -113,43 +116,63 @@ bool plugin_needs_before_insn(uint64_t pc, void *cpu){
 }
 
 void plugin_before_insn(uint64_t pc, void *cpu){
+    static uint64_t last_pc = 0;
     uint8_t inst_buffer[4];
     uint32_t el = qemulib_get_current_el(cpu);
-    uint32_t tid = qemulib_get_tid(cpu, el);
+    uint32_t tid = qemulib_get_tid(cpu, 0);
 
     if (!start_seen && (pc == startpc)) {
-        if(track_tid){
-            tracked_tid = tid;
-            printf("Starting PC seen at EL%d: %#lx with TID: %ld\n", el, pc, tracked_tid);
-        } else{
-            printf("Starting PC seen at EL%d: %#lx\n", el, pc);
+        qemulib_read_memory(cpu, pc, inst_buffer, sizeof(uint32_t));
+        uint32_t insn = (inst_buffer[3] << 24) | (inst_buffer[2] << 16) | (inst_buffer[1] << 8) | inst_buffer[0];
+        if(!track_encoding || (track_encoding && insn == startencoding)){
+            printf("Encoding: %#lx, track_encoding: %d\n", startencoding, track_encoding);
+            if(track_tid){
+                tracked_tid = tid;
+                printf("Starting PC seen at EL%d: %#lx with TID: %ld\n", el, pc, tracked_tid);
+            } else{
+                printf("Starting PC seen at EL%d: %#lx\n", el, pc);
+            }
+            inst_count = 0;
+            start_seen = 1;
         }
-        inst_count = 0;
-        start_seen = 1;
+    }
+
+    if (!start_seen) return;
+    bool log_inst = (!track_tid || (track_tid && tracked_tid == tid));
+    if( !log_inst ) return;
+
+    // Filtering out PC duplicates which maybe caused due to page faults, etc.
+    if( el == 0 ) {
+        if( last_pc == pc ) return;
+        last_pc = pc;
+        inst_count++;
     }
 
     if( plugin_mode == PLUGIN_MODE_TRACING ){ 
         if(!simpoints_before_inst_cb(el) || simpoints_complete()) return;
         qemulib_read_memory(cpu, pc, inst_buffer, sizeof(uint32_t));
     }
+
     inst_cb(/*qemulib_get_cpuid(cpu)*/0, el, tid, pc, /*qemulib_translate_memory(cpu, pc)*/0,
             sizeof(uint32_t), inst_buffer);
 }
 
 void plugin_after_mem(void *cpu, uint64_t v, int size, int type){
     if( plugin_mode != PLUGIN_MODE_TRACING ) return;
-    if( !simpoints_before_mem_cb() || simpoints_complete() ) return;
-    uint32_t el = 0;//qemulib_get_current_el(cpu);
-    mem_cb(/*qemulib_get_cpuid(cpu)*/0, el, qemulib_get_tid(cpu, el), v,
-            qemulib_translate_memory(cpu, v), size, type);
-}
 
-void inst_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t pc_va, uint64_t pc_pa, uint8_t insn_len, const uint8_t *insn_buff){
     if (!start_seen) return;
+    uint32_t el = 0;//qemulib_get_current_el(cpu); // setting to 0 as its don't care
+    uint32_t tid = qemulib_get_tid(cpu, el);
 
     bool log_inst = (!track_tid || (track_tid && tracked_tid == tid));
     if( !log_inst ) return;
 
+    if( !simpoints_before_mem_cb() || simpoints_complete() ) return;
+    mem_cb(/*qemulib_get_cpuid(cpu)*/0, el, tid, v,
+            qemulib_translate_memory(cpu, v), size, type);
+}
+
+void inst_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t pc_va, uint64_t pc_pa, uint8_t insn_len, const uint8_t *insn_buff){
     // TODO: Opportunity for optimization - we don't need all 32 bits to decode; can probably
     // work with insn_buff[3]?
     uint32_t insn;// = (insn_buff[3] << 24) | (insn_buff[2] << 16) | (insn_buff[1] << 8) | insn_buff[0];
@@ -200,23 +223,17 @@ void inst_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t pc_va, uint64_t pc_
                                   } 
                                   break;
         case PLUGIN_MODE_TRACING:
-                                  simpoints_inst_cb(pc_va, el, insn_buff);
-                                  break;
+                                  {
+                                      simpoints_inst_cb(pc_va, el, insn_buff);
+                                      break;
+                                  }
         default:
                                   assert(0 && "Illegal plugin mode detected");
                                   break;
     }
-
-    ++inst_count;
-    return;
 }
 
 void mem_cb(int cpu_id, uint32_t el, uint32_t tid, uint64_t va, uint64_t pa, int size, int type){
-    if (!start_seen) return;
-
-    bool log_inst = (!track_tid || (track_tid && tracked_tid == tid));
-    if( !log_inst ) return;
-
     simpoints_mem_cb(va, pa);
 }
 
@@ -241,7 +258,11 @@ bool plugin_update_env(){
     startpc = strtol(startpc_str, NULL, 16);
     start_seen = (startpc == 0);
 
-    printf("Updating state from env vars: %d; startpc = 0x%016x; start_seen = %d\n", inst_count, startpc, start_seen);
+    const char *startencoding_str = plugin_helper_str_default( getenv("STARTPC_ENCODING"), "0" );
+    startencoding = strtol(startencoding_str, NULL, 16);
+    track_encoding = (startencoding != 0);
+
+    printf("Updating state from env vars: %d; startpc = 0x%016x; startpcencoding = 0x%016x; start_seen = %d\n", inst_count, startpc, startencoding, start_seen);
 
 
     track_tid = atoi( plugin_helper_str_default( getenv("TRACK_TID"), "1" ) );
@@ -273,9 +294,11 @@ bool plugin_update_env(){
     // Check the mode; if tracing, call it's init
     switch( plugin_mode ){
         case PLUGIN_MODE_TRACING:
-            printf("Pluin mode: Tracing\n");
-            simpoints_trace_init(simpt_samples, bbv_interval);
-            break;
+            {
+                printf("Pluin mode: Tracing\n");
+                simpoints_trace_init(simpt_samples, bbv_interval);
+                break;
+            }
         case PLUGIN_MODE_BBV_GEN:
             {
                 const char *bbv_dfile = plugin_helper_str_default( getenv("BBV_DEBUG_FILE"), DEFAULT_BBV_DEBUGFILE );

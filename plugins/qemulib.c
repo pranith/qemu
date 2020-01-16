@@ -70,5 +70,5 @@ uint32_t qemulib_get_tid(void *cpu, uint32_t el)
 
     assert( arm_cpu );
     assert( el != -1 );
-    return arm_cpu ? arm_cpu->env.cp15.contextidr_el[el] : -1;
+    return arm_cpu ? arm_cpu->env.cp15.tpidr_el[el] : -1;
 }

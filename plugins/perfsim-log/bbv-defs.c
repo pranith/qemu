@@ -163,6 +163,7 @@ void bbv_commit(uint64_t commit_entry_pc, uint64_t commit_exit_pc, uint64_t term
             // Subset of a bigger bbv
             // Right split - create the right split after reducing the size of bigger bbv so as to not fire aseertions
             uint64_t right_size = (BBV_GET_LAST(exit_pc_bbv_id) - commit_exit_pc) / 0x4;
+            uint64_t old_freq   = basic_block_vector[exit_pc_bbv_id].freq;
 
             if( commit_entry_pc == basic_block_vector[exit_pc_bbv_id].bbentry_pc ){
                 // Left aligned split
@@ -180,17 +181,18 @@ void bbv_commit(uint64_t commit_entry_pc, uint64_t commit_exit_pc, uint64_t term
                 // Center split
                 uint64_t center_split_bbv_index = bbv_create_array_entry(commit_entry_pc, bb_debugfile);
                 bbv_set_size(center_split_bbv_index, size, OTHER);
-                basic_block_vector[center_split_bbv_index].freq = basic_block_vector[exit_pc_bbv_id].freq + 1;
+                basic_block_vector[center_split_bbv_index].freq = old_freq + 1;
             }
             DFPRINTF(bb_debugfile, "triupdate(%016x %016x; %016x %016x) ", basic_block_vector[exit_pc_bbv_id].bbentry_pc, 
                     BBV_GET_LAST(exit_pc_bbv_id),
                     commit_entry_pc, exit);
 
+            // Carving the right split after reducing the size of old split
             if( right_size > 0 ){
                 DFPRINTF(bb_debugfile, "triupdate(%016x %016x) ", commit_exit_pc + 0x4, commit_exit_pc + right_size * 0x4);
                 uint64_t right_split_bbv_index = bbv_create_array_entry(commit_exit_pc + 0x4, bb_debugfile);
                 bbv_set_size(right_split_bbv_index, right_size, basic_block_vector[exit_pc_bbv_id].term_cond);
-                basic_block_vector[right_split_bbv_index].freq = basic_block_vector[exit_pc_bbv_id].freq;
+                basic_block_vector[right_split_bbv_index].freq = old_freq;
             }
         } else{
             // case 3c
@@ -210,7 +212,7 @@ void bbv_commit(uint64_t commit_entry_pc, uint64_t commit_exit_pc, uint64_t term
 
 // Dump the BBs collected in this interval and clear out the bb vector
 void bbv_dump(FILE *bb_logfile, FILE *bb_intervalfile, uint64_t bbv_interval_user_pc_count){
-    uint64_t i;
+    uint64_t i, user_count = 0;
 
     assert(bb_logfile && "NULL bb_logfile passed");
     assert(bb_intervalfile && "NULL bb_intervalfile passed");
@@ -218,10 +220,13 @@ void bbv_dump(FILE *bb_logfile, FILE *bb_intervalfile, uint64_t bbv_interval_use
     DFPRINTF(stdout, "Dumping in %d instructions with %d bbv's\n", bbv_interval_user_pc_count, live_bb_count);
     // Start with a literal "T" to mark the start of an interval
     fprintf(bb_logfile,"T");
+
     for( i = 0; i < live_bb_count; i++ ){
         if (basic_block_vector[i].freq) {
             // Dump and clear the basic block
-            fprintf(bb_logfile, ":%"PRId64":%"PRId64" ", basic_block_vector[i].bbentry_pc, (basic_block_vector[i].freq) * (basic_block_vector[i].size));
+            uint64_t bb_count =  (basic_block_vector[i].freq) * (basic_block_vector[i].size);
+            fprintf(bb_logfile, ":%"PRId64":%"PRId64" ", basic_block_vector[i].bbentry_pc, bb_count);
+            user_count +=  bb_count;
         }
         basic_block_vector[i].bbentry_pc = 0x0;
         basic_block_vector[i].bbexit_pc  = 0x0;
@@ -238,6 +243,7 @@ void bbv_dump(FILE *bb_logfile, FILE *bb_intervalfile, uint64_t bbv_interval_use
             bbv_interval_start_user_pc_count, 
             bbv_interval_user_pc_count);
     bbv_interval_start_user_pc_count += bbv_interval_user_pc_count;
+    assert( (user_count == bbv_interval_user_pc_count) && "user_count mismatches between BBV's and plugin" );
     ++bbv_interval_count;
 
     // Clearing the bbv's
