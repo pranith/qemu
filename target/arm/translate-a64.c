@@ -826,6 +826,14 @@ static void gen_adc_CC(int sf, TCGv_i64 dest, TCGv_i64 t0, TCGv_i64 t1)
  */
 
 /*
+ * Prefetch instruction callback generation
+ */
+static void do_prefetch()
+{
+    return;
+}
+
+/*
  * Store from GPR register to memory.
  */
 static void do_gpr_st_memidx(DisasContext *s, TCGv_i64 source,
@@ -2605,12 +2613,12 @@ static void disas_ld_lit(DisasContext *s, uint32_t insn)
             return;
         }
     } else {
+        size = 2 + extract32(opc, 0, 1);
+        is_signed = extract32(opc, 1, 1);
         if (opc == 3) {
             /* PRFM (literal) : prefetch */
             return;
         }
-        size = 2 + extract32(opc, 0, 1);
-        is_signed = extract32(opc, 1, 1);
     }
 
     tcg_rt = cpu_reg(s, rt);
