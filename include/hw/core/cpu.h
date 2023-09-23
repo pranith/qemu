@@ -633,6 +633,8 @@ extern CPUTailQ cpus_queue;
 
 extern __thread CPUState *current_cpu;
 
+extern __thread MemState memState;
+
 /**
  * cpu_paging_enabled:
  * @cpu: The CPU whose state is to be inspected.

@@ -114,8 +114,28 @@ static void gen_st_i64(TCGv_i64 v, TCGTemp *addr, MemOpIdx oi)
     gen_ldst1(INDEX_op_qemu_st, TCG_TYPE_I64, tcgv_i64_temp(v), addr, oi);
 }
 
-static void tcg_gen_req_mo(TCGBar type)
+static void tcg_gen_req_mo(MemOpType motype)
 {
+    TCGBar type = 0;
+
+    if (motype == LOAD) {
+        if (memState == START) {
+            type = TCG_MO_LD_LD | TCG_MO_ST_LD;
+        } else if (memState == AFTER_LOAD) {
+            type = TCG_MO_LD_LD;
+        }
+        memState = AFTER_LOAD;
+    } else if (motype == STORE) {
+        if (memState == START) {
+            type = TCG_MO_LD_ST | TCG_MO_ST_ST;
+        } else if (memState == AFTER_LOAD) {
+            type = TCG_MO_LD_ST;
+        } else if (memState == AFTER_STORE) {
+            type = TCG_MO_ST_ST;
+        }
+        memState = AFTER_STORE;
+    }
+
     type &= tcg_ctx->guest_mo;
     type &= ~TCG_TARGET_DEFAULT_MO;
     if (type) {
@@ -246,7 +266,7 @@ static void tcg_gen_qemu_ld_i32_int(TCGv_i32 val, TCGTemp *addr,
     TCGv_i64 copy_addr;
     TCGTemp *addr_new;
 
-    tcg_gen_req_mo(TCG_MO_LD_LD | TCG_MO_ST_LD);
+    tcg_gen_req_mo(LOAD);
     orig_memop = memop = tcg_canonicalize_memop(memop, 0, 0);
     orig_oi = oi = make_memop_idx(memop, idx);
 
@@ -297,7 +317,7 @@ static void tcg_gen_qemu_st_i32_int(TCGv_i32 val, TCGTemp *addr,
     MemOpIdx orig_oi, oi;
     TCGTemp *addr_new;
 
-    tcg_gen_req_mo(TCG_MO_LD_ST | TCG_MO_ST_ST);
+    tcg_gen_req_mo(STORE);
     memop = tcg_canonicalize_memop(memop, 0, 1);
     orig_oi = oi = make_memop_idx(memop, idx);
 
@@ -344,7 +364,7 @@ static void tcg_gen_qemu_ld_i64_int(TCGv_i64 val, TCGTemp *addr,
     TCGv_i64 copy_addr;
     TCGTemp *addr_new;
 
-    tcg_gen_req_mo(TCG_MO_LD_LD | TCG_MO_ST_LD);
+    tcg_gen_req_mo(LOAD);
     orig_memop = memop = tcg_canonicalize_memop(memop, 1, 0);
     orig_oi = oi = make_memop_idx(memop, idx);
 
@@ -399,7 +419,7 @@ static void tcg_gen_qemu_st_i64_int(TCGv_i64 val, TCGTemp *addr,
     MemOpIdx orig_oi, oi;
     TCGTemp *addr_new;
 
-    tcg_gen_req_mo(TCG_MO_LD_ST | TCG_MO_ST_ST);
+    tcg_gen_req_mo(STORE);
     memop = tcg_canonicalize_memop(memop, 1, 1);
     orig_oi = oi = make_memop_idx(memop, idx);
 
@@ -540,7 +560,7 @@ static void tcg_gen_qemu_ld_i128_int(TCGv_i128 val, TCGTemp *addr,
     TCGTemp *addr_new;
 
     check_max_alignment(memop_alignment_bits(memop));
-    tcg_gen_req_mo(TCG_MO_LD_LD | TCG_MO_ST_LD);
+    tcg_gen_req_mo(LOAD);
 
     /* In serial mode, reduce atomicity. */
     if (!(tcg_ctx->gen_tb->cflags & CF_PARALLEL)) {
@@ -653,7 +673,7 @@ static void tcg_gen_qemu_st_i128_int(TCGv_i128 val, TCGTemp *addr,
     TCGTemp *addr_new;
 
     check_max_alignment(memop_alignment_bits(memop));
-    tcg_gen_req_mo(TCG_MO_ST_LD | TCG_MO_ST_ST);
+    tcg_gen_req_mo(STORE);
 
     /* In serial mode, reduce atomicity. */
     if (!(tcg_ctx->gen_tb->cflags & CF_PARALLEL)) {

@@ -45,4 +45,14 @@ typedef enum {
     TCG_BAR_SC    = 0x30,  /* No ops cross barrier; OR of the above */
 } TCGBar;
 
+typedef enum {
+   NO_MEM_OP,
+   LOAD,
+   STORE,
+   RMW,
+   MFENCE,
+   SFENCE,
+   LFENCE,
+} MemOpType;
+
 #endif /* TCG_MO_H */

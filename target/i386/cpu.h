@@ -1978,6 +1978,13 @@ typedef struct CPUCaches {
         CPUCacheInfo *l3_cache;
 } CPUCaches;
 
+typedef enum MemState {
+    START,
+    AFTER_LOAD,
+    AFTER_STORE,
+    AFTER_FENCE,
+} X86MemState;
+
 typedef struct CPUArchState {
     /* standard registers */
     target_ulong regs[CPU_NB_EREGS];
