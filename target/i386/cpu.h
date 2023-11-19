@@ -1983,6 +1983,7 @@ typedef enum MemState {
     AFTER_LOAD,
     AFTER_STORE,
     AFTER_FENCE,
+    AFTER_RMW,
 } X86MemState;
 
 typedef struct CPUArchState {
