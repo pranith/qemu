@@ -192,6 +192,14 @@ typedef struct ARMMMUFaultInfo ARMMMUFaultInfo;
 
 typedef struct NVICState NVICState;
 
+typedef enum MemState {
+    START,
+    AFTER_LOAD,
+    AFTER_STORE,
+    AFTER_FENCE,
+    AFTER_RMW,
+} ArmMemState;
+
 /*
  * Enum for indexing vfp.fp_status[].
  *

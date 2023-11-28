@@ -203,6 +203,14 @@ typedef struct PMUCTRState {
     target_ulong irq_overflow_left;
 } PMUCTRState;
 
+typedef enum MemState {
+    START,
+    AFTER_LOAD,
+    AFTER_STORE,
+    AFTER_FENCE,
+    AFTER_RMW,
+} RiscvMemState;
+
 typedef struct PMUFixedCtrState {
         /* Track cycle and icount for each privilege mode */
         uint64_t counter[4];

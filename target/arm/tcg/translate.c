@@ -44,6 +44,8 @@
 #define HELPER_H "tcg/helper-defs.h"
 #include "exec/helper-info.c.inc"
 
+__thread ArmMemState memState;
+
 /* These are TCG globals which alias CPUARMState fields */
 static TCGv_i32 cpu_R[16];
 TCGv_i32 cpu_CF, cpu_NF, cpu_VF, cpu_ZF;
