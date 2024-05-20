@@ -118,6 +118,9 @@ static void tcg_gen_req_mo(MemOpType motype)
 {
     TCGBar type = 0;
 
+#if (defined(TARGET_I386) || defined(TARGET_X86_64)) && \
+    (defined(__arm__) || defined(__arm) || defined(__aarch64__) || \
+     defined(__riscv))
     if (motype == LOAD) {
         if (memState == START) {
             type = TCG_MO_LD_LD | TCG_MO_ST_LD;
@@ -148,6 +151,19 @@ static void tcg_gen_req_mo(MemOpType motype)
         }
         memState = AFTER_RMW;
     }
+#elif (defined(TARGET_AARCH64) || defined(TARGET_ARM) ||                 \
+       defined(TARGET_RISCV) || defined(TARGET_RISCV32) ||               \
+       defined(TARGET_RISCV64)) &&                                        \
+      (defined(__i386) || defined(__i386__) || defined(__x86_64) ||      \
+       defined(__x86_64__))
+    /* keep default behaviour for these host/guest combinations */
+#else
+    if (motype == LOAD) {
+        type = TCG_MO_LD_LD | TCG_MO_ST_LD;
+    } else {
+        type = TCG_MO_LD_ST | TCG_MO_ST_ST;
+    }
+#endif
 
     type &= tcg_ctx->guest_mo;
     type &= ~TCG_TARGET_DEFAULT_MO;
