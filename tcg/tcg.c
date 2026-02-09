@@ -102,6 +102,8 @@ struct TCGLabelQemuLdst {
     bool acqrel_fallback_entry; /* branch target that forwards to shared body */
     bool acqrel_fallback_body;  /* shared out-of-line acq/rel fallback body */
     bool acqrel_fallback_ret_lr; /* shared body returns with RET if true */
+    bool acqrel_fallback_canon; /* body uses canonical temp regs */
+    uint16_t acqrel_fallback_refcnt; /* number of entry stubs targeting body */
     MemOpIdx oi;
     TCGType type;           /* result type of a load */
     TCGReg addr_reg;        /* reg index for guest virtual addr */

@@ -1634,10 +1634,21 @@ static TCGLabelQemuLdst *get_acqrel_fallback_body(TCGContext *s, bool is_ld,
     TCGLabelQemuLdst *lb;
     bool ret_lr = (base_reg != TCG_REG_LR &&
                    (!is_ld || data_reg != TCG_REG_LR));
+    bool canon = ret_lr;
+
+    if (canon) {
+        /*
+         * Canonical bodies are entered via BL/RET, so keep the canonical
+         * base out of x30 (LR).
+         */
+        base_reg = TCG_REG_ACQREL_ALIGN;
+        data_reg = TCG_REG_TMP1;
+    }
 
     QSIMPLEQ_FOREACH(lb, &s->ldst_labels, next) {
         if (lb->acqrel_fallback_body &&
             lb->is_ld == is_ld &&
+            lb->acqrel_fallback_canon == canon &&
             lb->acqrel_fallback_ret_lr == ret_lr &&
             lb->oi == oi &&
             lb->type == type &&
@@ -1650,6 +1661,7 @@ static TCGLabelQemuLdst *get_acqrel_fallback_body(TCGContext *s, bool is_ld,
     lb = new_ldst_label(s);
     lb->is_ld = is_ld;
     lb->acqrel_fallback_body = true;
+    lb->acqrel_fallback_canon = canon;
     lb->acqrel_fallback_ret_lr = ret_lr;
     lb->oi = oi;
     lb->type = type;
@@ -1664,6 +1676,12 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
     HostAddress h;
 
     if (lb->acqrel_fallback_body) {
+        if (!lb->acqrel_fallback_canon &&
+            lb->acqrel_fallback_ret_lr &&
+            lb->acqrel_fallback_refcnt == 1) {
+            /* Single-user bodies are inlined at the entry stub. */
+            return true;
+        }
         lb->raddr = tcg_splitwx_to_rx(s->code_ptr);
         h.base = lb->base_reg;
         h.index = TCG_REG_XZR;
@@ -1684,11 +1702,42 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
 
     if (lb->acqrel_fallback_entry) {
         tcg_debug_assert(lb->acqrel_fallback_target != NULL);
-        tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-        if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
-            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+        if (!lb->acqrel_fallback_target->acqrel_fallback_canon &&
+            lb->acqrel_fallback_target->acqrel_fallback_ret_lr &&
+            lb->acqrel_fallback_target->acqrel_fallback_refcnt == 1) {
+            /*
+             * Inline single-user fallback bodies to avoid the extra
+             * BL/RET round-trip.
+             */
+            h.base = lb->acqrel_fallback_target->base_reg;
+            h.index = TCG_REG_XZR;
+            h.index_ext = TCG_TYPE_I64;
+            tcg_out_qemu_ld_direct(s, opc, lb->acqrel_fallback_target->type,
+                                   lb->acqrel_fallback_target->datalo_reg, h);
+            tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
             tcg_out_goto(s, lb->raddr);
+        } else if (lb->acqrel_fallback_target->acqrel_fallback_canon) {
+            if (lb->base_reg != TCG_REG_ACQREL_ALIGN) {
+                tcg_out_mov(s, TCG_TYPE_I64,
+                            TCG_REG_ACQREL_ALIGN, lb->base_reg);
+            }
+            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
+            if (lb->datalo_reg == TCG_REG_TMP1) {
+                tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
+                             (tcg_target_long)(uintptr_t)lb->raddr);
+                tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
+            } else {
+                tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+                tcg_out_mov(s, lb->type, lb->datalo_reg, TCG_REG_TMP1);
+                tcg_out_goto(s, lb->raddr);
+            }
+        } else if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
+            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
+            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
+                         (tcg_target_long)(uintptr_t)lb->raddr);
+            tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
         } else {
+            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
             tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_TMP0,
                          (tcg_target_long)(uintptr_t)lb->raddr);
             tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
@@ -1709,6 +1758,12 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
     HostAddress h;
 
     if (lb->acqrel_fallback_body) {
+        if (!lb->acqrel_fallback_canon &&
+            lb->acqrel_fallback_ret_lr &&
+            lb->acqrel_fallback_refcnt == 1) {
+            /* Single-user bodies are inlined at the entry stub. */
+            return true;
+        }
         lb->raddr = tcg_splitwx_to_rx(s->code_ptr);
         h.base = lb->base_reg;
         h.index = TCG_REG_XZR;
@@ -1729,11 +1784,38 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
 
     if (lb->acqrel_fallback_entry) {
         tcg_debug_assert(lb->acqrel_fallback_target != NULL);
-        tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-        if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
-            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+        if (!lb->acqrel_fallback_target->acqrel_fallback_canon &&
+            lb->acqrel_fallback_target->acqrel_fallback_ret_lr &&
+            lb->acqrel_fallback_target->acqrel_fallback_refcnt == 1) {
+            /*
+             * Inline single-user fallback bodies to avoid the extra
+             * BL/RET round-trip.
+             */
+            h.base = lb->acqrel_fallback_target->base_reg;
+            h.index = TCG_REG_XZR;
+            h.index_ext = TCG_TYPE_I64;
+            tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+            tcg_out_qemu_st_direct(s, opc, lb->acqrel_fallback_target->datalo_reg, h);
             tcg_out_goto(s, lb->raddr);
+        } else if (lb->acqrel_fallback_target->acqrel_fallback_canon) {
+            if (lb->base_reg != TCG_REG_ACQREL_ALIGN) {
+                tcg_out_mov(s, TCG_TYPE_I64,
+                            TCG_REG_ACQREL_ALIGN, lb->base_reg);
+            }
+            if (lb->datalo_reg != TCG_REG_TMP1) {
+                tcg_out_mov(s, lb->type, TCG_REG_TMP1, lb->datalo_reg);
+            }
+            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
+            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
+                         (tcg_target_long)(uintptr_t)lb->raddr);
+            tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
+        } else if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
+            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
+            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
+                         (tcg_target_long)(uintptr_t)lb->raddr);
+            tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
         } else {
+            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
             tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_TMP0,
                          (tcg_target_long)(uintptr_t)lb->raddr);
             tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
@@ -2003,7 +2085,7 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     can_use_ldar = !size_lg || h.aa.align >= size_lg;
     reuse_hoist = (s->acqrel_align_hoist_valid &&
                    s->acqrel_align_hoist_addr == addr_reg &&
-                   s->acqrel_align_hoist_size_lg == size_lg);
+                   s->acqrel_align_hoist_size_lg >= size_lg);
     if (!can_use_ldar && size_lg) {
         /*
          * The translator often cannot prove alignment, but x86 code may
@@ -2017,17 +2099,20 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
         misalign->is_ld = true;
         misalign->acqrel_fallback_entry = true;
         misalign->oi = oi;
+        misalign->base_reg = base;
+        misalign->datalo_reg = data_reg;
         misalign->acqrel_fallback_target = body;
+        body->acqrel_fallback_refcnt++;
 
         if (reuse_hoist) {
             misalign->label_ptr[0] = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
         } else {
             /* w_align = base & align_mask; non-zero means misaligned. */
-            tcg_out_logicali(s, I3404_ANDI, TCG_TYPE_I64,
+            tcg_out_logicali(s, I3404_ANDSI, 0,
                              TCG_REG_ACQREL_ALIGN, base, align_mask);
             misalign->label_ptr[0] = s->code_ptr;
-            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+            tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
             s->acqrel_align_hoist_valid = true;
             s->acqrel_align_hoist_addr = addr_reg;
             s->acqrel_align_hoist_size_lg = size_lg;
@@ -2118,7 +2203,7 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
     can_use_stlr = !size_lg || h.aa.align >= size_lg;
     reuse_hoist = (s->acqrel_align_hoist_valid &&
                    s->acqrel_align_hoist_addr == addr_reg &&
-                   s->acqrel_align_hoist_size_lg == size_lg);
+                   s->acqrel_align_hoist_size_lg >= size_lg);
     if (!can_use_stlr && size_lg) {
         base = tcg_out_qemu_ldst_base(s, &h);
         align_mask = (1u << size_lg) - 1;
@@ -2128,17 +2213,20 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
         misalign->is_ld = false;
         misalign->acqrel_fallback_entry = true;
         misalign->oi = oi;
+        misalign->base_reg = base;
+        misalign->datalo_reg = data_reg;
         misalign->acqrel_fallback_target = body;
+        body->acqrel_fallback_refcnt++;
 
         if (reuse_hoist) {
             misalign->label_ptr[0] = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
         } else {
             /* w_align = base & align_mask; non-zero means misaligned. */
-            tcg_out_logicali(s, I3404_ANDI, TCG_TYPE_I64,
+            tcg_out_logicali(s, I3404_ANDSI, 0,
                              TCG_REG_ACQREL_ALIGN, base, align_mask);
             misalign->label_ptr[0] = s->code_ptr;
-            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+            tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
             s->acqrel_align_hoist_valid = true;
             s->acqrel_align_hoist_addr = addr_reg;
             s->acqrel_align_hoist_size_lg = size_lg;
