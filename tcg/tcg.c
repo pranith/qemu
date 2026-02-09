@@ -1101,6 +1101,13 @@ typedef struct TCGOutOpSubtract {
 
 #include "tcg-target.c.inc"
 
+#if !TCG_TARGET_HAS_ld_acq
+#define outop_qemu_ld_acq outop_qemu_ld
+#endif
+#if !TCG_TARGET_HAS_st_rel
+#define outop_qemu_st_rel outop_qemu_st
+#endif
+
 #ifndef CONFIG_TCG_INTERPRETER
 /* Validate CPUTLBDescFast placement. */
 QEMU_BUILD_BUG_ON((int)(offsetof(CPUNegativeOffsetState, tlb.f[0]) -
@@ -1202,8 +1209,10 @@ static const TCGOutOp * const all_outop[NB_OPS] = {
     OUTOP(INDEX_op_or, TCGOutOpBinary, outop_or),
     OUTOP(INDEX_op_orc, TCGOutOpBinary, outop_orc),
     OUTOP(INDEX_op_qemu_ld, TCGOutOpQemuLdSt, outop_qemu_ld),
+    OUTOP(INDEX_op_qemu_ld_acq, TCGOutOpQemuLdSt, outop_qemu_ld_acq),
     OUTOP(INDEX_op_qemu_ld2, TCGOutOpQemuLdSt2, outop_qemu_ld2),
     OUTOP(INDEX_op_qemu_st, TCGOutOpQemuLdSt, outop_qemu_st),
+    OUTOP(INDEX_op_qemu_st_rel, TCGOutOpQemuLdSt, outop_qemu_st_rel),
     OUTOP(INDEX_op_qemu_st2, TCGOutOpQemuLdSt2, outop_qemu_st2),
     OUTOP(INDEX_op_rems, TCGOutOpBinary, outop_rems),
     OUTOP(INDEX_op_remu, TCGOutOpBinary, outop_remu),
@@ -1943,6 +1952,8 @@ void tcg_func_start(TCGContext *s)
     s->nb_ops = 0;
     s->nb_labels = 0;
     s->current_frame_offset = s->frame_start;
+    s->pending_ld_acq = false;
+    s->pending_st_rel = false;
 
 #ifdef CONFIG_DEBUG_TCG
     s->goto_tb_issue_mask = 0;
@@ -2351,6 +2362,8 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
     case INDEX_op_goto_ptr:
         return true;
 
+    case INDEX_op_qemu_ld_acq:
+    case INDEX_op_qemu_st_rel:
     case INDEX_op_qemu_ld:
     case INDEX_op_qemu_st:
         tcg_debug_assert(type <= TCG_TYPE_REG);
@@ -2917,6 +2930,8 @@ void tcg_dump_ops(TCGContext *s, FILE *f, bool have_prefs)
                 }
                 i = 1;
                 break;
+            case INDEX_op_qemu_ld_acq:
+            case INDEX_op_qemu_st_rel:
             case INDEX_op_qemu_ld:
             case INDEX_op_qemu_st:
             case INDEX_op_qemu_ld2:
@@ -5693,7 +5708,9 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
         break;
 
     case INDEX_op_qemu_ld:
+    case INDEX_op_qemu_ld_acq:
     case INDEX_op_qemu_st:
+    case INDEX_op_qemu_st_rel:
         {
             const TCGOutOpQemuLdSt *out =
                 container_of(all_outop[op->opc], TCGOutOpQemuLdSt, base);

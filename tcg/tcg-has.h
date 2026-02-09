@@ -9,6 +9,17 @@
 
 #include "tcg-target-has.h"
 
+#ifndef TCG_TARGET_HAS_ld_acq
+#define TCG_TARGET_HAS_ld_acq 0
+#endif
+#ifndef TCG_TARGET_HAS_st_rel
+#define TCG_TARGET_HAS_st_rel 0
+#endif
+
+#if TCG_TARGET_REG_BITS == 32
+/* Turn some undef macros into false macros.  */
+#define TCG_TARGET_HAS_extr_i64_i32     0
+#endif
 #if !defined(TCG_TARGET_HAS_v64) \
     && !defined(TCG_TARGET_HAS_v128) \
     && !defined(TCG_TARGET_HAS_v256)

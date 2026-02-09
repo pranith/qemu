@@ -1877,6 +1877,47 @@ static bool fold_mb(OptContext *ctx, TCGOp *op)
     return true;
 }
 
+static void fold_mb_with_qemu_memop(OptContext *ctx, TCGOp *op, bool is_store)
+{
+    TCGOp *mb = ctx->prev_mb;
+    TCGBar need, have, keep;
+
+    if (!mb || ctx->type > TCG_TYPE_REG) {
+        return;
+    }
+
+    have = mb->args[0] & TCG_MO_ALL;
+    if (!is_store) {
+        if (!TCG_TARGET_HAS_ld_acq) {
+            return;
+        }
+        need = have & (TCG_MO_LD_LD | TCG_MO_LD_ST);
+        if (!need) {
+            return;
+        }
+        op->opc = INDEX_op_qemu_ld_acq;
+    } else {
+        if (!TCG_TARGET_HAS_st_rel) {
+            return;
+        }
+        need = have & (TCG_MO_LD_ST | TCG_MO_ST_ST);
+        if (!need) {
+            return;
+        }
+        op->opc = INDEX_op_qemu_st_rel;
+    }
+
+    keep = have & ~need;
+    if (keep) {
+        mb->args[0] = (mb->args[0] & ~TCG_MO_ALL) | keep;
+    } else {
+        tcg_op_remove(ctx->tcg, mb);
+        if (ctx->prev_mb == mb) {
+            ctx->prev_mb = NULL;
+        }
+    }
+}
+
 static bool fold_mov(OptContext *ctx, TCGOp *op)
 {
     return tcg_opt_gen_mov(ctx, op, op->args[0], op->args[1]);
@@ -2152,6 +2193,8 @@ static bool fold_qemu_ld_1reg(OptContext *ctx, TCGOp *op)
         }
     }
 
+    fold_mb_with_qemu_memop(ctx, op, false);
+
     /* Opcodes that touch guest memory stop the mb optimization.  */
     ctx->prev_mb = NULL;
 
@@ -2167,6 +2210,8 @@ static bool fold_qemu_ld_2reg(OptContext *ctx, TCGOp *op)
 
 static bool fold_qemu_st(OptContext *ctx, TCGOp *op)
 {
+    fold_mb_with_qemu_memop(ctx, op, true);
+
     /* Opcodes that touch guest memory stop the mb optimization.  */
     ctx->prev_mb = NULL;
     return true;
