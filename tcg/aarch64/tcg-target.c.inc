@@ -430,6 +430,17 @@ typedef enum {
     I3306_LDXP      = 0xc8600000,
     I3306_STXP      = 0xc8200000,
 
+    /* Load-acquire, store-release instructions */
+    I3306_STLRB     = 0x089ffc00,
+    I3306_STLRH     = 0x489ffc00,
+    I3306_STLRW     = 0x889ffc00,
+    I3306_STLRX     = 0xc89ffc00,
+
+    I3306_LDARB     = 0x08dffc00,
+    I3306_LDARH     = 0x48dffc00,
+    I3306_LDARW     = 0x88dffc00,
+    I3306_LDARX     = 0xc8dffc00,
+
     /* Load/store register.  Described here as 3.3.12, but the helper
        that emits them can transform to 3.3.10 or 3.3.13.  */
     I3312_STRB      = 0x38000000 | LDST_ST << 22 | MO_8 << 30,
@@ -677,6 +688,12 @@ static void tcg_out_insn_3306(TCGContext *s, AArch64Insn insn, TCGReg rs,
                               TCGReg rt, TCGReg rt2, TCGReg rn)
 {
     tcg_out32(s, insn | rs << 16 | rt2 << 10 | rn << 5 | rt);
+}
+
+static void tcg_out_insn_3306_aq(TCGContext *s, AArch64Insn insn, TCGReg rt,
+                                 TCGReg rn)
+{
+    tcg_out32(s, insn | rn << 5 | rt);
 }
 
 static void tcg_out_insn_3201(TCGContext *s, AArch64Insn insn, TCGType ext,
@@ -1749,6 +1766,20 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
     return ldst;
 }
 
+static TCGReg tcg_out_qemu_ldst_base(TCGContext *s, const HostAddress *h)
+{
+    if (h->index == TCG_REG_XZR) {
+        return h->base;
+    }
+    if (h->index_ext == TCG_TYPE_I32) {
+        tcg_out_insn(s, 3501, ADD, TCG_TYPE_I64,
+                     TCG_REG_TMP2, h->base, h->index, MO_32, 0);
+    } else {
+        tcg_out_insn(s, 3502, ADD, 1, TCG_REG_TMP2, h->base, h->index);
+    }
+    return TCG_REG_TMP2;
+}
+
 static void tcg_out_qemu_ld_direct(TCGContext *s, MemOp memop, TCGType ext,
                                    TCGReg data_r, HostAddress h)
 {
@@ -1823,6 +1854,75 @@ static const TCGOutOpQemuLdSt outop_qemu_ld = {
     .out = tgen_qemu_ld,
 };
 
+static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
+                             TCGReg data_reg, TCGReg addr_reg, MemOpIdx oi)
+{
+    TCGLabelQemuLdst *ldst;
+    HostAddress h;
+    AArch64Insn insn;
+    TCGReg base;
+    MemOp memop = get_memop(oi);
+    MemOp s_bits = MO_8;
+    bool sign_ext = false;
+    bool can_use_ldar;
+
+    switch (memop & MO_SSIZE) {
+    case MO_UB:
+        insn = I3306_LDARB;
+        break;
+    case MO_SB:
+        insn = I3306_LDARB;
+        s_bits = MO_8;
+        sign_ext = true;
+        break;
+    case MO_UW:
+        insn = I3306_LDARH;
+        break;
+    case MO_SW:
+        insn = I3306_LDARH;
+        s_bits = MO_16;
+        sign_ext = true;
+        break;
+    case MO_UL:
+        insn = I3306_LDARW;
+        break;
+    case MO_SL:
+        insn = I3306_LDARW;
+        s_bits = MO_32;
+        sign_ext = true;
+        break;
+    case MO_UQ:
+        insn = I3306_LDARX;
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    ldst = prepare_host_addr(s, &h, addr_reg, oi, true);
+    can_use_ldar = !(memop & MO_SIZE) || h.aa.align >= (memop & MO_SIZE);
+    if (can_use_ldar) {
+        base = tcg_out_qemu_ldst_base(s, &h);
+        tcg_out_insn_3306_aq(s, insn, data_reg, base);
+        if (sign_ext) {
+            tcg_out_sxt(s, data_type, s_bits, data_reg, data_reg);
+        }
+    } else {
+        tcg_out_qemu_ld_direct(s, memop, data_type, data_reg, h);
+        tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+    }
+
+    if (ldst) {
+        ldst->type = data_type;
+        ldst->datalo_reg = data_reg;
+        ldst->raddr = tcg_splitwx_to_rx(s->code_ptr);
+    }
+}
+
+static const TCGOutOpQemuLdSt outop_qemu_ld_acq = {
+    .base.static_constraint = C_O1_I1(r, r),
+    .out = tgen_qemu_ld_acq,
+};
+
 static void tgen_qemu_st(TCGContext *s, TCGType data_type, TCGReg data_reg,
                          TCGReg addr_reg, MemOpIdx oi)
 {
@@ -1842,6 +1942,55 @@ static void tgen_qemu_st(TCGContext *s, TCGType data_type, TCGReg data_reg,
 static const TCGOutOpQemuLdSt outop_qemu_st = {
     .base.static_constraint = C_O0_I2(rz, r),
     .out = tgen_qemu_st,
+};
+
+static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
+                             TCGReg data_reg, TCGReg addr_reg, MemOpIdx oi)
+{
+    TCGLabelQemuLdst *ldst;
+    HostAddress h;
+    AArch64Insn insn;
+    TCGReg base;
+    MemOp memop = get_memop(oi);
+    bool can_use_stlr;
+
+    switch (memop & MO_SIZE) {
+    case MO_8:
+        insn = I3306_STLRB;
+        break;
+    case MO_16:
+        insn = I3306_STLRH;
+        break;
+    case MO_32:
+        insn = I3306_STLRW;
+        break;
+    case MO_64:
+        insn = I3306_STLRX;
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    ldst = prepare_host_addr(s, &h, addr_reg, oi, false);
+    can_use_stlr = !(memop & MO_SIZE) || h.aa.align >= (memop & MO_SIZE);
+    if (can_use_stlr) {
+        base = tcg_out_qemu_ldst_base(s, &h);
+        tcg_out_insn_3306_aq(s, insn, data_reg, base);
+    } else {
+        tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+        tcg_out_qemu_st_direct(s, memop, data_reg, h);
+    }
+
+    if (ldst) {
+        ldst->type = data_type;
+        ldst->datalo_reg = data_reg;
+        ldst->raddr = tcg_splitwx_to_rx(s->code_ptr);
+    }
+}
+
+static const TCGOutOpQemuLdSt outop_qemu_st_rel = {
+    .base.static_constraint = C_O0_I2(rz, r),
+    .out = tgen_qemu_st_rel,
 };
 
 static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
