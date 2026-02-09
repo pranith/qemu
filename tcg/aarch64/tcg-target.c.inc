@@ -442,6 +442,12 @@ typedef enum {
     I3306_LDARW     = 0x88dffc00,
     I3306_LDARX     = 0xc8dffc00,
 
+    /* Load-acquire RCpc instructions (LRCPC/LRCPC2). */
+    I3306_LDAPRB    = 0x38bfc000,
+    I3306_LDAPRH    = 0x78bfc000,
+    I3306_LDAPRW    = 0xb8bfc000,
+    I3306_LDAPRX    = 0xf8bfc000,
+
     /* Load/store register.  Described here as 3.3.12, but the helper
        that emits them can transform to 3.3.10 or 3.3.13.  */
     I3312_STRB      = 0x38000000 | LDST_ST << 22 | MO_8 << 30,
@@ -2048,41 +2054,42 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     uint64_t align_mask = 0;
     bool reuse_hoist = false;
     bool can_use_ldar;
+    bool use_ldapr = have_lrcpc2;
 
     switch (memop & MO_SSIZE) {
     case MO_UB:
-        insn = I3306_LDARB;
+        insn = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
         break;
     case MO_SB:
-        insn = I3306_LDARB;
+        insn = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
         s_bits = MO_8;
         sign_ext = true;
         break;
     case MO_UW:
-        insn = I3306_LDARH;
+        insn = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
         break;
     case MO_SW:
-        insn = I3306_LDARH;
+        insn = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
         s_bits = MO_16;
         sign_ext = true;
         break;
     case MO_UL:
-        insn = I3306_LDARW;
+        insn = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
         break;
     case MO_SL:
-        insn = I3306_LDARW;
+        insn = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
         s_bits = MO_32;
         sign_ext = true;
         break;
     case MO_UQ:
-        insn = I3306_LDARX;
+        insn = use_ldapr ? I3306_LDAPRX : I3306_LDARX;
         break;
     default:
         g_assert_not_reached();
     }
 
     ldst = prepare_host_addr(s, &h, addr_reg, oi, true);
-    can_use_ldar = !size_lg || h.aa.align >= size_lg;
+    can_use_ldar = use_ldapr || !size_lg || h.aa.align >= size_lg;
     reuse_hoist = (s->acqrel_align_hoist_valid &&
                    s->acqrel_align_hoist_addr == addr_reg &&
                    s->acqrel_align_hoist_size_lg >= size_lg);
