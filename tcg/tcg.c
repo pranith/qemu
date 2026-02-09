@@ -5499,14 +5499,63 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
      */
     if (s->acqrel_align_hoist_valid) {
         bool clear_hoist = false;
+        TCGReg old_hoist = s->acqrel_align_hoist_addr;
 
         if (op->opc == INDEX_op_set_label ||
             (def->flags & (TCG_OPF_COND_BRANCH | TCG_OPF_BB_END))) {
             clear_hoist = true;
+        } else if (op->opc == INDEX_op_mov &&
+                   nb_oargs == 1 && nb_iargs == 1 &&
+                   !const_args[0] && !const_args[1] &&
+                   new_args[1] == old_hoist) {
+            /*
+             * Preserve and retarget the cached check across a plain move:
+             * if dst := src and src was the checked address register, the
+             * same checked value now resides in dst.
+             */
+            s->acqrel_align_hoist_addr = new_args[0];
+        } else if (op->opc == INDEX_op_add &&
+                   nb_oargs == 1 && nb_iargs == 2 &&
+                   !const_args[0]) {
+            int var = -1, cst = -1;
+            tcg_target_ulong cval, mask;
+
+            if (!const_args[1] && const_args[2] && new_args[1] == old_hoist) {
+                var = 1;
+                cst = 2;
+            } else if (const_args[1] && !const_args[2] && new_args[2] == old_hoist) {
+                var = 2;
+                cst = 1;
+            }
+
+            if (var >= 0) {
+                cval = new_args[cst];
+                mask = MAKE_64BIT_MASK(0, s->acqrel_align_hoist_size_lg);
+                if ((cval & mask) == 0) {
+                    s->acqrel_align_hoist_addr = new_args[0];
+                } else {
+                    clear_hoist = true;
+                }
+            } else {
+                clear_hoist = true;
+            }
+        } else if (op->opc == INDEX_op_sub &&
+                   nb_oargs == 1 && nb_iargs == 2 &&
+                   !const_args[0] &&
+                   !const_args[1] && const_args[2] &&
+                   new_args[1] == old_hoist) {
+            tcg_target_ulong cval = new_args[2];
+            tcg_target_ulong mask = MAKE_64BIT_MASK(0, s->acqrel_align_hoist_size_lg);
+
+            if ((cval & mask) == 0) {
+                s->acqrel_align_hoist_addr = new_args[0];
+            } else {
+                clear_hoist = true;
+            }
         } else {
             for (i = 0; i < nb_oargs; i++) {
                 if (!const_args[i] &&
-                    new_args[i] == s->acqrel_align_hoist_addr) {
+                    new_args[i] == old_hoist) {
                     clear_hoist = true;
                     break;
                 }
