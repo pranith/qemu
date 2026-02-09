@@ -355,6 +355,9 @@ struct TCGContext {
     TCGBar guest_mo;
     bool pending_ld_acq;
     bool pending_st_rel;
+    bool acqrel_align_hoist_valid;
+    TCGReg acqrel_align_hoist_addr;
+    unsigned acqrel_align_hoist_size_lg;
 
     TCGRegSet reserved_regs;
     intptr_t current_frame_offset;

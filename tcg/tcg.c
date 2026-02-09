@@ -99,11 +99,16 @@ typedef struct QEMU_PACKED {
 
 struct TCGLabelQemuLdst {
     bool is_ld;             /* qemu_ld: true, qemu_st: false */
+    bool acqrel_fallback_entry; /* branch target that forwards to shared body */
+    bool acqrel_fallback_body;  /* shared out-of-line acq/rel fallback body */
+    bool acqrel_fallback_ret_lr; /* shared body returns with RET if true */
     MemOpIdx oi;
     TCGType type;           /* result type of a load */
     TCGReg addr_reg;        /* reg index for guest virtual addr */
+    TCGReg base_reg;        /* precomputed host address base for fallback */
     TCGReg datalo_reg;      /* reg index for low word to be loaded or stored */
     TCGReg datahi_reg;      /* reg index for high word to be loaded or stored */
+    struct TCGLabelQemuLdst *acqrel_fallback_target;
     const tcg_insn_unit *raddr;   /* addr of the next IR of qemu_ld/st IR */
     tcg_insn_unit *label_ptr[2]; /* label pointers to be updated */
     QSIMPLEQ_ENTRY(TCGLabelQemuLdst) next;
@@ -1954,6 +1959,7 @@ void tcg_func_start(TCGContext *s)
     s->current_frame_offset = s->frame_start;
     s->pending_ld_acq = false;
     s->pending_st_rel = false;
+    s->acqrel_align_hoist_valid = false;
 
 #ifdef CONFIG_DEBUG_TCG
     s->goto_tb_issue_mask = 0;
@@ -5481,6 +5487,32 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
             set_temp_val_reg(s, ts, reg);
             ts->mem_coherent = 0;
             new_args[i] = reg;
+        }
+    }
+
+    /*
+     * AArch64 acq/rel lowering may reuse a prior runtime alignment check.
+     * Keep this cache valid only across straight-line code and while the
+     * cached address register is not redefined.
+     */
+    if (s->acqrel_align_hoist_valid) {
+        bool clear_hoist = false;
+
+        if (op->opc == INDEX_op_set_label ||
+            (def->flags & (TCG_OPF_COND_BRANCH | TCG_OPF_BB_END))) {
+            clear_hoist = true;
+        } else {
+            for (i = 0; i < nb_oargs; i++) {
+                if (!const_args[i] &&
+                    new_args[i] == s->acqrel_align_hoist_addr) {
+                    clear_hoist = true;
+                    break;
+                }
+            }
+        }
+
+        if (clear_hoist) {
+            s->acqrel_align_hoist_valid = false;
         }
     }
 
