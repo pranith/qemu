@@ -1167,6 +1167,7 @@ static void gen_ADD(DisasContext *s, X86DecodedInsn *decode);
 static void gen_ADC(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
     TCGv c_in;
 
     /*
@@ -1189,7 +1190,7 @@ static void gen_ADC(DisasContext *s, X86DecodedInsn *decode)
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_add_tl(s->T0, c_in, s->T1);
         tcg_gen_atomic_add_fetch_tl(s->T0, s->A0, s->T0,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
     } else {
         tcg_gen_add_tl(s->T0, s->T0, s->T1);
         tcg_gen_add_tl(s->T0, s->T0, c_in);
@@ -1266,13 +1267,17 @@ static void gen_ADCX(DisasContext *s, X86DecodedInsn *decode)
 static void gen_ADD(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
+    unsigned a1 = decode_int_op_align_bits(s, decode, 1);
+    unsigned a2 = decode_int_op_align_bits(s, decode, 2);
 
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_atomic_add_fetch_tl(s->T0, s->A0, s->T1,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
     } else {
         tcg_gen_add_tl(s->T0, s->T0, s->T1);
     }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, MIN(a1, a2), decode->op[0].ot));
     prepare_update2_cc(decode, s, CC_OP_ADDB + ot);
 }
 
@@ -1284,21 +1289,27 @@ static void gen_ADOX(DisasContext *s, X86DecodedInsn *decode)
 static void gen_AND(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
+    unsigned a1 = decode_int_op_align_bits(s, decode, 1);
+    unsigned a2 = decode_int_op_align_bits(s, decode, 2);
 
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_atomic_and_fetch_tl(s->T0, s->A0, s->T1,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
     } else {
         tcg_gen_and_tl(s->T0, s->T0, s->T1);
     }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, MAX(a1, a2), decode->op[0].ot));
     prepare_update1_cc(decode, s, CC_OP_LOGICB + ot);
 }
 
 static void gen_ANDN(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    unsigned a2 = decode_int_op_align_bits(s, decode, 2);
 
     tcg_gen_andc_tl(s->T0, s->T1, s->T0);
+    set_temp_align_bits(s, s->T0, align_for_ot(s, a2, decode->op[0].ot));
     prepare_update1_cc(decode, s, CC_OP_LOGICB + ot);
 }
 
@@ -1512,11 +1523,12 @@ static void gen_BT(DisasContext *s, X86DecodedInsn *decode)
 static void gen_BTC(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
     TCGv old = tcg_temp_new();
     TCGv mask = gen_bt_mask(s, decode);
 
     if (s->prefix & PREFIX_LOCK) {
-        tcg_gen_atomic_fetch_xor_tl(old, s->A0, mask, s->mem_index, ot | MO_LE);
+        tcg_gen_atomic_fetch_xor_tl(old, s->A0, mask, s->mem_index, memop);
     } else {
         tcg_gen_mov_tl(old, s->T0);
         tcg_gen_xor_tl(s->T0, s->T0, mask);
@@ -1528,13 +1540,14 @@ static void gen_BTC(DisasContext *s, X86DecodedInsn *decode)
 static void gen_BTR(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
     TCGv old = tcg_temp_new();
     TCGv mask = gen_bt_mask(s, decode);
 
     if (s->prefix & PREFIX_LOCK) {
         TCGv maskc = tcg_temp_new();
         tcg_gen_not_tl(maskc, mask);
-        tcg_gen_atomic_fetch_and_tl(old, s->A0, maskc, s->mem_index, ot | MO_LE);
+        tcg_gen_atomic_fetch_and_tl(old, s->A0, maskc, s->mem_index, memop);
     } else {
         tcg_gen_mov_tl(old, s->T0);
         tcg_gen_andc_tl(s->T0, s->T0, mask);
@@ -1546,11 +1559,12 @@ static void gen_BTR(DisasContext *s, X86DecodedInsn *decode)
 static void gen_BTS(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
     TCGv old = tcg_temp_new();
     TCGv mask = gen_bt_mask(s, decode);
 
     if (s->prefix & PREFIX_LOCK) {
-        tcg_gen_atomic_fetch_or_tl(old, s->A0, mask, s->mem_index, ot | MO_LE);
+        tcg_gen_atomic_fetch_or_tl(old, s->A0, mask, s->mem_index, memop);
     } else {
         tcg_gen_mov_tl(old, s->T0);
         tcg_gen_or_tl(s->T0, s->T0, mask);
@@ -1562,6 +1576,7 @@ static void gen_BTS(DisasContext *s, X86DecodedInsn *decode)
 static void gen_BZHI(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    unsigned src_align = decode_int_op_align_bits(s, decode, 1);
     TCGv bound = tcg_constant_tl(ot == MO_64 ? 63 : 31);
     TCGv zero = tcg_constant_tl(0);
     TCGv mone = tcg_constant_tl(-1);
@@ -1571,6 +1586,7 @@ static void gen_BZHI(DisasContext *s, X86DecodedInsn *decode)
     tcg_gen_shl_tl(s->A0, mone, s->T1);
     tcg_gen_movcond_tl(TCG_COND_LEU, s->A0, s->T1, bound, s->A0, zero);
     tcg_gen_andc_tl(s->T0, s->T0, s->A0);
+    set_temp_align_bits(s, s->T0, align_for_ot(s, src_align, decode->op[0].ot));
     /*
      * Note that since we're using BMILG (in order to get O
      * cleared) we need to store the inverse into C.
@@ -1685,6 +1701,7 @@ static void gen_CMPccXADD(DisasContext *s, X86DecodedInsn *decode)
          */
         ot_full |= MO_SIGN;
     }
+    ot_full = memop_with_inferred_align(s, ot_full, s->A0);
 
     /*
      * cmpv will be moved to cc_src *after* cpu_regs[] is written back, so use
@@ -1759,6 +1776,7 @@ static void gen_CMPS(DisasContext *s, X86DecodedInsn *decode)
 static void gen_CMPXCHG(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[2].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
     TCGv cmpv = tcg_temp_new();
     TCGv oldv = tcg_temp_new();
     TCGv newv = tcg_temp_new();
@@ -1768,7 +1786,7 @@ static void gen_CMPXCHG(DisasContext *s, X86DecodedInsn *decode)
     tcg_gen_ext_tl(newv, s->T1, ot);
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_atomic_cmpxchg_tl(oldv, s->A0, cmpv, newv,
-                                  s->mem_index, ot | MO_LE);
+                                  s->mem_index, memop);
     } else {
         tcg_gen_ext_tl(oldv, s->T0, ot);
         if (decode->op[0].has_ea) {
@@ -1854,6 +1872,7 @@ static void gen_CMPXCHG16B(DisasContext *s, X86DecodedInsn *decode)
 
 static void gen_CMPXCHG8B(DisasContext *s, X86DecodedInsn *decode)
 {
+    MemOp memop = memop_with_inferred_align(s, MO_LEUQ, s->A0);
     TCGv_i64 cmp, val, old;
     TCGv Z;
 
@@ -1867,10 +1886,10 @@ static void gen_CMPXCHG8B(DisasContext *s, X86DecodedInsn *decode)
 
     /* Only require atomic with LOCK; non-parallel handled in generator. */
     if (s->prefix & PREFIX_LOCK) {
-        tcg_gen_atomic_cmpxchg_i64(old, s->A0, cmp, val, s->mem_index, MO_LEUQ);
+        tcg_gen_atomic_cmpxchg_i64(old, s->A0, cmp, val, s->mem_index, memop);
     } else {
         tcg_gen_nonatomic_cmpxchg_i64(old, s->A0, cmp, val,
-                                      s->mem_index, MO_LEUQ);
+                                      s->mem_index, memop);
     }
 
     /* Compute the required value of Z. */
@@ -1973,11 +1992,12 @@ static void gen_DAS(DisasContext *s, X86DecodedInsn *decode)
 static void gen_DEC(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
 
     tcg_gen_movi_tl(s->T1, -1);
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_atomic_add_fetch_tl(s->T0, s->A0, s->T1,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
     } else {
         tcg_gen_add_tl(s->T0, s->T0, s->T1);
     }
@@ -2204,11 +2224,12 @@ static void gen_IN(DisasContext *s, X86DecodedInsn *decode)
 static void gen_INC(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
 
     tcg_gen_movi_tl(s->T1, 1);
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_atomic_add_fetch_tl(s->T0, s->A0, s->T1,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
     } else {
         tcg_gen_add_tl(s->T0, s->T0, s->T1);
     }
@@ -2384,6 +2405,7 @@ static void gen_LEA(DisasContext *s, X86DecodedInsn *decode)
 {
     TCGv ea = gen_lea_modrm_1(s, decode->mem, false);
     gen_lea_v_seg_dest(s, s->aflag, s->T0, ea, -1, -1);
+    set_temp_align_bits(s, s->T0, value_align_bits(s, s->T0));
 }
 
 static void gen_LEAVE(DisasContext *s, X86DecodedInsn *decode)
@@ -2498,7 +2520,7 @@ static void gen_MFENCE(DisasContext *s, X86DecodedInsn *decode)
 
 static void gen_MOV(DisasContext *s, X86DecodedInsn *decode)
 {
-    /* nothing to do! */
+    set_temp_align_bits(s, s->T0, decode_int_op_align_bits(s, decode, 1));
 }
 #define gen_NOP gen_MOV
 
@@ -2516,12 +2538,13 @@ static void gen_MASKMOV(DisasContext *s, X86DecodedInsn *decode)
 static void gen_MOVBE(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_BE, s->A0);
 
     /* M operand type does not load/store */
     if (decode->e.op0 == X86_TYPE_M) {
-        tcg_gen_qemu_st_tl(s->T0, s->A0, s->mem_index, ot | MO_BE);
+        tcg_gen_qemu_st_tl(s->T0, s->A0, s->mem_index, memop);
     } else {
-        tcg_gen_qemu_ld_tl(s->T0, s->A0, s->mem_index, ot | MO_BE);
+        tcg_gen_qemu_ld_tl(s->T0, s->A0, s->mem_index, memop);
     }
 }
 
@@ -2590,7 +2613,7 @@ static void gen_MOVQ(DisasContext *s, X86DecodedInsn *decode)
 
     tcg_gen_ld_i64(t, tcg_env, decode->op[2].offset);
     if (decode->op[0].has_ea) {
-        tcg_gen_qemu_st_i64(t, s->A0, s->mem_index, MO_LEUQ);
+        gen_op_st_i64(s, s->tmp1_i64, s->A0, MO_LEUQ);
     } else {
         /*
          * tcg_gen_gvec_dup_i64(MO_64, op0.offset, 8, vec_len, s->tmp1_64) would
@@ -2702,6 +2725,8 @@ static void gen_MULX(DisasContext *s, X86DecodedInsn *decode)
 static void gen_NEG(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
+    unsigned src_align = decode_int_op_align_bits(s, decode, 1);
     TCGv oldv = tcg_temp_new();
 
     if (s->prefix & PREFIX_LOCK) {
@@ -2713,12 +2738,13 @@ static void gen_NEG(DisasContext *s, X86DecodedInsn *decode)
         gen_op_ld_v(s, ot, oldv, s->A0);
         tcg_gen_neg_tl(newv, oldv);
         tcg_gen_atomic_cmpxchg_tl(cmpv, s->A0, oldv, newv,
-                                  s->mem_index, ot | MO_LE);
+                                  s->mem_index, memop);
         tcg_gen_brcond_tl(TCG_COND_NE, oldv, cmpv, label1);
     } else {
         tcg_gen_mov_tl(oldv, s->T0);
     }
     tcg_gen_neg_tl(s->T0, oldv);
+    set_temp_align_bits(s, s->T0, align_for_ot(s, src_align, decode->op[0].ot));
 
     decode->cc_dst = s->T0;
     decode->cc_src = oldv;
@@ -2729,11 +2755,12 @@ static void gen_NEG(DisasContext *s, X86DecodedInsn *decode)
 static void gen_NOT(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
 
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_movi_tl(s->T0, ~0);
         tcg_gen_atomic_xor_fetch_tl(s->T0, s->A0, s->T0,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
     } else {
         tcg_gen_not_tl(s->T0, s->T0);
     }
@@ -2742,13 +2769,17 @@ static void gen_NOT(DisasContext *s, X86DecodedInsn *decode)
 static void gen_OR(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
+    unsigned a1 = decode_int_op_align_bits(s, decode, 1);
+    unsigned a2 = decode_int_op_align_bits(s, decode, 2);
 
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_atomic_or_fetch_tl(s->T0, s->A0, s->T1,
-                                   s->mem_index, ot | MO_LE);
+                                   s->mem_index, memop);
     } else {
         tcg_gen_or_tl(s->T0, s->T0, s->T1);
     }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, MIN(a1, a2), decode->op[0].ot));
     prepare_update1_cc(decode, s, CC_OP_LOGICB + ot);
 }
 
@@ -3277,6 +3308,17 @@ static MemOp gen_shift_count(DisasContext *s, X86DecodedInsn *decode,
     }
 
     return ot;
+}
+
+static bool tcg_tl_is_const(TCGv v, target_ulong *val)
+{
+    TCGTemp *ts = tcgv_tl_temp(v);
+
+    if (ts->val_type != TEMP_VAL_CONST) {
+        return false;
+    }
+    *val = ts->val;
+    return true;
 }
 
 /*
@@ -3814,6 +3856,8 @@ static void gen_SAR(DisasContext *s, X86DecodedInsn *decode)
 {
     bool can_be_zero;
     TCGv count;
+    target_ulong sh;
+    unsigned align = 0;
     MemOp ot = gen_shift_count(s, decode, &can_be_zero, &count, decode->op[2].unit);
 
     if (!count) {
@@ -3825,6 +3869,11 @@ static void gen_SAR(DisasContext *s, X86DecodedInsn *decode)
     tcg_gen_subi_tl(decode->cc_src, count, 1);
     tcg_gen_sar_tl(decode->cc_src, s->T0, decode->cc_src);
     tcg_gen_sar_tl(s->T0, s->T0, count);
+    if (tcg_tl_is_const(count, &sh)) {
+        unsigned src_align = decode_int_op_align_bits(s, decode, 1);
+        align = ((unsigned)sh >= src_align) ? 0 : src_align - (unsigned)sh;
+    }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, align, decode->op[0].ot));
     if (can_be_zero) {
         gen_shift_dynamic_flags(s, decode, count, CC_OP_SARB + ot);
     } else {
@@ -3835,17 +3884,25 @@ static void gen_SAR(DisasContext *s, X86DecodedInsn *decode)
 static void gen_SARX(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    target_ulong sh;
+    unsigned align = 0;
     int mask;
 
     mask = ot == MO_64 ? 63 : 31;
     tcg_gen_andi_tl(s->T1, s->T1, mask);
     tcg_gen_sar_tl(s->T0, s->T0, s->T1);
+    if (tcg_tl_is_const(s->T1, &sh)) {
+        unsigned src_align = decode_int_op_align_bits(s, decode, 1);
+        align = ((unsigned)sh >= src_align) ? 0 : src_align - (unsigned)sh;
+    }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, align, decode->op[0].ot));
 }
 
 static void gen_SUB(DisasContext *s, X86DecodedInsn *decode);
 static void gen_SBB(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
     TCGv c_in;
 
     /*
@@ -3877,7 +3934,7 @@ static void gen_SBB(DisasContext *s, X86DecodedInsn *decode)
         tcg_gen_add_tl(s->T0, s->T1, c_in);
         tcg_gen_neg_tl(s->T0, s->T0);
         tcg_gen_atomic_add_fetch_tl(s->T0, s->A0, s->T0,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
     } else {
         tcg_gen_sub_tl(s->T0, s->T0, s->T1);
         tcg_gen_sub_tl(s->T0, s->T0, c_in);
@@ -3959,6 +4016,8 @@ static void gen_SHL(DisasContext *s, X86DecodedInsn *decode)
 {
     bool can_be_zero;
     TCGv count;
+    target_ulong sh;
+    unsigned align = 0;
     MemOp ot = gen_shift_count(s, decode, &can_be_zero, &count, decode->op[2].unit);
 
     if (!count) {
@@ -3970,6 +4029,12 @@ static void gen_SHL(DisasContext *s, X86DecodedInsn *decode)
     tcg_gen_subi_tl(decode->cc_src, count, 1);
     tcg_gen_shl_tl(decode->cc_src, s->T0, decode->cc_src);
     tcg_gen_shl_tl(s->T0, s->T0, count);
+    if (tcg_tl_is_const(count, &sh)) {
+        unsigned src_align = decode_int_op_align_bits(s, decode, 1);
+        unsigned max_bits = align_width_bits(s, decode->op[0].ot);
+        align = MIN(max_bits, src_align + (unsigned)sh);
+    }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, align, decode->op[0].ot));
     if (can_be_zero) {
         gen_shift_dynamic_flags(s, decode, count, CC_OP_SHLB + ot);
     } else {
@@ -4000,17 +4065,27 @@ static void gen_SHLD(DisasContext *s, X86DecodedInsn *decode)
 static void gen_SHLX(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    target_ulong sh;
+    unsigned align = 0;
     int mask;
 
     mask = ot == MO_64 ? 63 : 31;
     tcg_gen_andi_tl(s->T1, s->T1, mask);
     tcg_gen_shl_tl(s->T0, s->T0, s->T1);
+    if (tcg_tl_is_const(s->T1, &sh)) {
+        unsigned src_align = decode_int_op_align_bits(s, decode, 1);
+        unsigned max_bits = align_width_bits(s, decode->op[0].ot);
+        align = MIN(max_bits, src_align + (unsigned)sh);
+    }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, align, decode->op[0].ot));
 }
 
 static void gen_SHR(DisasContext *s, X86DecodedInsn *decode)
 {
     bool can_be_zero;
     TCGv count;
+    target_ulong sh;
+    unsigned align = 0;
     MemOp ot = gen_shift_count(s, decode, &can_be_zero, &count, decode->op[2].unit);
 
     if (!count) {
@@ -4022,6 +4097,11 @@ static void gen_SHR(DisasContext *s, X86DecodedInsn *decode)
     tcg_gen_subi_tl(decode->cc_src, count, 1);
     tcg_gen_shr_tl(decode->cc_src, s->T0, decode->cc_src);
     tcg_gen_shr_tl(s->T0, s->T0, count);
+    if (tcg_tl_is_const(count, &sh)) {
+        unsigned src_align = decode_int_op_align_bits(s, decode, 1);
+        align = ((unsigned)sh >= src_align) ? 0 : src_align - (unsigned)sh;
+    }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, align, decode->op[0].ot));
     if (can_be_zero) {
         gen_shift_dynamic_flags(s, decode, count, CC_OP_SARB + ot);
     } else {
@@ -4033,6 +4113,8 @@ static void gen_SHRD(DisasContext *s, X86DecodedInsn *decode)
 {
     bool can_be_zero;
     TCGv count;
+    target_ulong sh;
+    unsigned align = 0;
     int unit = decode->e.op3 == X86_TYPE_I ? X86_OP_IMM : X86_OP_INT;
     MemOp ot = gen_shift_count(s, decode, &can_be_zero, &count, unit);
 
@@ -4042,6 +4124,11 @@ static void gen_SHRD(DisasContext *s, X86DecodedInsn *decode)
 
     decode->cc_dst = s->T0;
     decode->cc_src = gen_shiftd_rm_T1(s, ot, true, count);
+    if (tcg_tl_is_const(count, &sh)) {
+        unsigned src_align = decode_int_op_align_bits(s, decode, 1);
+        align = ((unsigned)sh >= src_align) ? 0 : src_align - (unsigned)sh;
+    }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, align, decode->op[0].ot));
     if (can_be_zero) {
         gen_shift_dynamic_flags(s, decode, count, CC_OP_SARB + ot);
     } else {
@@ -4052,11 +4139,18 @@ static void gen_SHRD(DisasContext *s, X86DecodedInsn *decode)
 static void gen_SHRX(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[0].ot;
+    target_ulong sh;
+    unsigned align = 0;
     int mask;
 
     mask = ot == MO_64 ? 63 : 31;
     tcg_gen_andi_tl(s->T1, s->T1, mask);
     tcg_gen_shr_tl(s->T0, s->T0, s->T1);
+    if (tcg_tl_is_const(s->T1, &sh)) {
+        unsigned src_align = decode_int_op_align_bits(s, decode, 1);
+        align = ((unsigned)sh >= src_align) ? 0 : src_align - (unsigned)sh;
+    }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, align, decode->op[0].ot));
 }
 
 static void gen_STC(DisasContext *s, X86DecodedInsn *decode)
@@ -4098,16 +4192,20 @@ static void gen_STOS(DisasContext *s, X86DecodedInsn *decode)
 static void gen_SUB(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
+    unsigned a1 = decode_int_op_align_bits(s, decode, 1);
+    unsigned a2 = decode_int_op_align_bits(s, decode, 2);
 
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_neg_tl(s->T0, s->T1);
         tcg_gen_atomic_fetch_add_tl(s->cc_srcT, s->A0, s->T0,
-                                    s->mem_index, ot | MO_LE);
+                                    s->mem_index, memop);
         tcg_gen_sub_tl(s->T0, s->cc_srcT, s->T1);
     } else {
         tcg_gen_mov_tl(s->cc_srcT, s->T0);
         tcg_gen_sub_tl(s->T0, s->T0, s->T1);
     }
+    set_temp_align_bits(s, s->T0, align_for_ot(s, MIN(a1, a2), decode->op[0].ot));
     prepare_update2_cc(decode, s, CC_OP_SUBB + ot);
 }
 
@@ -4437,7 +4535,7 @@ static void gen_VINSERTPS_m(DisasContext *s, X86DecodedInsn *decode)
 {
     TCGv_i32 tmp = tcg_temp_new_i32();
 
-    tcg_gen_qemu_ld_i32(tmp, s->A0, s->mem_index, MO_LEUL);
+    gen_op_ld_i32(s, tmp, s->A0, MO_LEUL);
     gen_vinsertps(s, decode, tmp);
 }
 
@@ -4546,17 +4644,15 @@ static void gen_VMOVLPx_ld(DisasContext *s, X86DecodedInsn *decode)
     int vec_len = vector_len(s, decode);
     TCGv_i64 t = tcg_temp_new_i64();
 
-    tcg_gen_qemu_ld_i64(t, s->A0, s->mem_index, MO_LEUQ);
+    gen_op_ld_i64(s, s->tmp1_i64, s->A0, MO_LEUQ);
     tcg_gen_gvec_mov(MO_64, decode->op[0].offset, decode->op[1].offset, vec_len, vec_len);
     tcg_gen_st_i64(t, OP_PTR0, offsetof(ZMMReg, ZMM_Q(0)));
 }
 
 static void gen_VMOVLPx_st(DisasContext *s, X86DecodedInsn *decode)
 {
-    TCGv_i64 t = tcg_temp_new_i64();
-
-    tcg_gen_ld_i64(t, OP_PTR2, offsetof(ZMMReg, ZMM_Q(0)));
-    tcg_gen_qemu_st_i64(t, s->A0, s->mem_index, MO_LEUQ);
+    tcg_gen_ld_i64(s->tmp1_i64, OP_PTR2, offsetof(ZMMReg, ZMM_Q(0)));
+    gen_op_st_i64(s, s->tmp1_i64, s->A0, MO_LEUQ);
 }
 
 static void gen_VMOVSD_ld(DisasContext *s, X86DecodedInsn *decode)
@@ -4564,7 +4660,7 @@ static void gen_VMOVSD_ld(DisasContext *s, X86DecodedInsn *decode)
     TCGv_i64 zero = tcg_constant_i64(0);
     TCGv_i64 t = tcg_temp_new_i64();
 
-    tcg_gen_qemu_ld_i64(t, s->A0, s->mem_index, MO_LEUQ);
+    gen_op_ld_i64(s, s->tmp1_i64, s->A0, MO_LEUQ);
     tcg_gen_st_i64(zero, OP_PTR0, offsetof(ZMMReg, ZMM_Q(1)));
     tcg_gen_st_i64(t, OP_PTR0, offsetof(ZMMReg, ZMM_Q(0)));
 }
@@ -4584,7 +4680,7 @@ static void gen_VMOVSS_ld(DisasContext *s, X86DecodedInsn *decode)
     int vec_len = vector_len(s, decode);
     TCGv_i32 tmp = tcg_temp_new_i32();
 
-    tcg_gen_qemu_ld_i32(tmp, s->A0, s->mem_index, MO_LEUL);
+    gen_op_ld_i32(s, tmp, s->A0, MO_LEUL);
     tcg_gen_gvec_dup_imm(MO_64, decode->op[0].offset, vec_len, vec_len, 0);
     tcg_gen_st_i32(tmp, OP_PTR0, offsetof(ZMMReg, ZMM_L(0)));
 }
@@ -4594,7 +4690,7 @@ static void gen_VMOVSS_st(DisasContext *s, X86DecodedInsn *decode)
     TCGv_i32 tmp = tcg_temp_new_i32();
 
     tcg_gen_ld_i32(tmp, OP_PTR2, offsetof(ZMMReg, ZMM_L(0)));
-    tcg_gen_qemu_st_i32(tmp, s->A0, s->mem_index, MO_LEUL);
+    gen_op_st_i32(s, tmp, s->A0, MO_LEUL);
 }
 
 static void gen_VPMASKMOV_st(DisasContext *s, X86DecodedInsn *decode)
@@ -4711,13 +4807,14 @@ static void gen_WRxxBASE(DisasContext *s, X86DecodedInsn *decode)
 static void gen_XADD(DisasContext *s, X86DecodedInsn *decode)
 {
     MemOp ot = decode->op[1].ot;
+    MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
 
     decode->cc_dst = tcg_temp_new();
     decode->cc_src = s->T1;
     decode->cc_op = CC_OP_ADDB + ot;
 
     if (s->prefix & PREFIX_LOCK) {
-        tcg_gen_atomic_fetch_add_tl(s->T0, s->A0, s->T1, s->mem_index, ot | MO_LE);
+        tcg_gen_atomic_fetch_add_tl(s->T0, s->A0, s->T1, s->mem_index, memop);
         tcg_gen_add_tl(decode->cc_dst, s->T0, s->T1);
     } else {
         tcg_gen_add_tl(decode->cc_dst, s->T0, s->T1);
@@ -4734,9 +4831,11 @@ static void gen_XADD(DisasContext *s, X86DecodedInsn *decode)
 
 static void gen_XCHG(DisasContext *s, X86DecodedInsn *decode)
 {
+    MemOp memop = memop_with_inferred_align(s, decode->op[0].ot | MO_LE, s->A0);
+
     if (s->prefix & PREFIX_LOCK) {
         tcg_gen_atomic_xchg_tl(s->T0, s->A0, s->T1,
-                               s->mem_index, decode->op[0].ot | MO_LE);
+                               s->mem_index, memop);
         /* now store old value into register operand */
         gen_op_mov_reg_v(s, decode->op[2].ot, decode->op[2].n, s->T0);
     } else {
@@ -4761,17 +4860,22 @@ static void gen_XOR(DisasContext *s, X86DecodedInsn *decode)
         decode->op[2].unit == X86_OP_INT &&
         decode->op[1].n == decode->op[2].n) {
         tcg_gen_movi_tl(s->T0, 0);
+        set_temp_align_bits(s, s->T0, max_align_bits(s));
         decode->cc_op = CC_OP_EFLAGS;
         decode->cc_src = tcg_constant_tl(CC_Z | CC_P);
     } else {
         MemOp ot = decode->op[1].ot;
+        MemOp memop = memop_with_inferred_align(s, ot | MO_LE, s->A0);
+        unsigned a1 = decode_int_op_align_bits(s, decode, 1);
+        unsigned a2 = decode_int_op_align_bits(s, decode, 2);
 
         if (s->prefix & PREFIX_LOCK) {
             tcg_gen_atomic_xor_fetch_tl(s->T0, s->A0, s->T1,
-                                        s->mem_index, ot | MO_LE);
+                                        s->mem_index, memop);
         } else {
             tcg_gen_xor_tl(s->T0, s->T0, s->T1);
         }
+        set_temp_align_bits(s, s->T0, align_for_ot(s, MIN(a1, a2), decode->op[0].ot));
         prepare_update1_cc(decode, s, CC_OP_LOGICB + ot);
     }
 }
