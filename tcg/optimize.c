@@ -1918,6 +1918,33 @@ static void fold_mb_with_qemu_memop(OptContext *ctx, TCGOp *op, bool is_store)
     }
 }
 
+/*
+ * If optimizer masks prove low address bits are zero, mark the memory op
+ * naturally aligned so backend lowering can skip runtime alignment guards.
+ */
+static void fold_qemu_memop_infer_align(TCGOp *op, bool is_store)
+{
+    const TCGOpDef *def = &tcg_op_defs[op->opc];
+    unsigned oi_arg = def->nb_oargs + def->nb_iargs;
+    unsigned addr_arg = def->nb_oargs + (is_store ? def->nb_iargs - 1 : 0);
+    MemOpIdx oi = op->args[oi_arg];
+    MemOp mop = get_memop(oi);
+    unsigned size_lg = mop & MO_SIZE;
+    uint64_t req_mask;
+
+    if (!size_lg || (mop & MO_AMASK) || (mop & MO_ALIGN_TLB_ONLY)) {
+        return;
+    }
+
+    req_mask = MAKE_64BIT_MASK(0, size_lg);
+    if ((arg_info(op->args[addr_arg])->z_mask & req_mask) != 0) {
+        return;
+    }
+
+    op->args[oi_arg] = make_memop_idx((mop & ~MO_AMASK) | MO_ALIGN,
+                                      get_mmuidx(oi));
+}
+
 static bool fold_mov(OptContext *ctx, TCGOp *op)
 {
     return tcg_opt_gen_mov(ctx, op, op->args[0], op->args[1]);
@@ -2193,6 +2220,7 @@ static bool fold_qemu_ld_1reg(OptContext *ctx, TCGOp *op)
         }
     }
 
+    fold_qemu_memop_infer_align(op, false);
     fold_mb_with_qemu_memop(ctx, op, false);
 
     /* Opcodes that touch guest memory stop the mb optimization.  */
@@ -2203,6 +2231,8 @@ static bool fold_qemu_ld_1reg(OptContext *ctx, TCGOp *op)
 
 static bool fold_qemu_ld_2reg(OptContext *ctx, TCGOp *op)
 {
+    fold_qemu_memop_infer_align(op, false);
+
     /* Opcodes that touch guest memory stop the mb optimization.  */
     ctx->prev_mb = NULL;
     return finish_folding(ctx, op);
@@ -2210,6 +2240,7 @@ static bool fold_qemu_ld_2reg(OptContext *ctx, TCGOp *op)
 
 static bool fold_qemu_st(OptContext *ctx, TCGOp *op)
 {
+    fold_qemu_memop_infer_align(op, true);
     fold_mb_with_qemu_memop(ctx, op, true);
 
     /* Opcodes that touch guest memory stop the mb optimization.  */
