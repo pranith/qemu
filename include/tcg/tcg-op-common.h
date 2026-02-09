@@ -78,6 +78,13 @@ void tcg_gen_lookup_and_goto_ptr(void);
 void tcg_gen_plugin_cb(unsigned from);
 void tcg_gen_plugin_mem_cb(TCGv_i64 addr, unsigned meminfo);
 
+/*
+ * Hint for folding address generation into acq/rel immediate forms.
+ * The hint is single-use and consumed by the next memory op emission.
+ */
+void tcg_set_st_rel_imm_hint(TCGTemp *addr, TCGTemp *base, int32_t disp);
+void tcg_clear_st_rel_imm_hint(void);
+
 /* 32 bit ops */
 
 void tcg_gen_movi_i32(TCGv_i32 ret, int32_t arg);

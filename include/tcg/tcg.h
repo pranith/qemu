@@ -354,7 +354,14 @@ struct TCGContext {
     TCGType addr_type;            /* TCG_TYPE_I32 or TCG_TYPE_I64 */
     TCGBar guest_mo;
     bool pending_ld_acq;
+    bool have_ld_acq_imm;
     bool pending_st_rel;
+    bool have_st_rel_imm;
+    bool pending_st_rel_imm_valid;
+    TCGTemp *pending_st_rel_imm_addr;
+    TCGTemp *pending_st_rel_imm_base;
+    int32_t pending_st_rel_imm_disp;
+    TCGOp *pending_st_rel_imm_anchor;
     bool acqrel_align_hoist_valid;
     TCGReg acqrel_align_hoist_addr;
     unsigned acqrel_align_hoist_size_lg;

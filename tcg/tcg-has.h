@@ -12,8 +12,14 @@
 #ifndef TCG_TARGET_HAS_ld_acq
 #define TCG_TARGET_HAS_ld_acq 0
 #endif
+#ifndef TCG_TARGET_HAS_ld_acq_imm
+#define TCG_TARGET_HAS_ld_acq_imm 0
+#endif
 #ifndef TCG_TARGET_HAS_st_rel
 #define TCG_TARGET_HAS_st_rel 0
+#endif
+#ifndef TCG_TARGET_HAS_st_rel_imm
+#define TCG_TARGET_HAS_st_rel_imm 0
 #endif
 
 #if TCG_TARGET_REG_BITS == 32

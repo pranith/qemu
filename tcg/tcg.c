@@ -99,6 +99,7 @@ typedef struct QEMU_PACKED {
 
 struct TCGLabelQemuLdst {
     bool is_ld;             /* qemu_ld: true, qemu_st: false */
+    bool acqrel_helper;     /* preserve acq/rel ordering on helper slow path */
     bool acqrel_fallback_entry; /* branch target that forwards to shared body */
     bool acqrel_fallback_body;  /* shared out-of-line acq/rel fallback body */
     bool acqrel_fallback_ret_lr; /* shared body returns with RET if true */
@@ -1077,6 +1078,18 @@ typedef struct TCGOutOpQemuLdSt2 {
                 TCGReg addr, MemOpIdx oi);
 } TCGOutOpQemuLdSt2;
 
+typedef struct TCGOutOpQemuStRelImm {
+    TCGOutOp base;
+    void (*out)(TCGContext *s, TCGType type, TCGReg data,
+                TCGReg base_addr, MemOpIdx oi, int32_t disp);
+} TCGOutOpQemuStRelImm;
+
+typedef struct TCGOutOpQemuLdAcqImm {
+    TCGOutOp base;
+    void (*out)(TCGContext *s, TCGType type, TCGReg data,
+                TCGReg base_addr, MemOpIdx oi, int32_t disp);
+} TCGOutOpQemuLdAcqImm;
+
 typedef struct TCGOutOpUnary {
     TCGOutOp base;
     void (*out_rr)(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1);
@@ -1111,8 +1124,20 @@ typedef struct TCGOutOpSubtract {
 #if !TCG_TARGET_HAS_ld_acq
 #define outop_qemu_ld_acq outop_qemu_ld
 #endif
+#if !TCG_TARGET_HAS_ld_acq_imm
+static const TCGOutOpQemuLdAcqImm outop_qemu_ld_acq_imm = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
+#endif
 #if !TCG_TARGET_HAS_st_rel
 #define outop_qemu_st_rel outop_qemu_st
+#endif
+#if !TCG_TARGET_HAS_st_rel_imm
+static const TCGOutOpQemuStRelImm outop_qemu_st_rel_imm = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
 #endif
 
 #ifndef CONFIG_TCG_INTERPRETER
@@ -1217,9 +1242,11 @@ static const TCGOutOp * const all_outop[NB_OPS] = {
     OUTOP(INDEX_op_orc, TCGOutOpBinary, outop_orc),
     OUTOP(INDEX_op_qemu_ld, TCGOutOpQemuLdSt, outop_qemu_ld),
     OUTOP(INDEX_op_qemu_ld_acq, TCGOutOpQemuLdSt, outop_qemu_ld_acq),
+    OUTOP(INDEX_op_qemu_ld_acq_imm, TCGOutOpQemuLdAcqImm, outop_qemu_ld_acq_imm),
     OUTOP(INDEX_op_qemu_ld2, TCGOutOpQemuLdSt2, outop_qemu_ld2),
     OUTOP(INDEX_op_qemu_st, TCGOutOpQemuLdSt, outop_qemu_st),
     OUTOP(INDEX_op_qemu_st_rel, TCGOutOpQemuLdSt, outop_qemu_st_rel),
+    OUTOP(INDEX_op_qemu_st_rel_imm, TCGOutOpQemuStRelImm, outop_qemu_st_rel_imm),
     OUTOP(INDEX_op_qemu_st2, TCGOutOpQemuLdSt2, outop_qemu_st2),
     OUTOP(INDEX_op_rems, TCGOutOpBinary, outop_rems),
     OUTOP(INDEX_op_remu, TCGOutOpBinary, outop_remu),
@@ -1961,6 +1988,8 @@ void tcg_func_start(TCGContext *s)
     s->current_frame_offset = s->frame_start;
     s->pending_ld_acq = false;
     s->pending_st_rel = false;
+    s->pending_st_rel_imm_valid = false;
+    s->pending_st_rel_imm_anchor = NULL;
     s->acqrel_align_hoist_valid = false;
 
 #ifdef CONFIG_DEBUG_TCG
@@ -2376,6 +2405,12 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
     case INDEX_op_qemu_st:
         tcg_debug_assert(type <= TCG_TYPE_REG);
         return true;
+    case INDEX_op_qemu_ld_acq_imm:
+        tcg_debug_assert(type <= TCG_TYPE_REG);
+        return TCG_TARGET_HAS_ld_acq_imm && tcg_ctx->have_ld_acq_imm;
+    case INDEX_op_qemu_st_rel_imm:
+        tcg_debug_assert(type <= TCG_TYPE_REG);
+        return TCG_TARGET_HAS_st_rel_imm && tcg_ctx->have_st_rel_imm;
 
     case INDEX_op_qemu_ld2:
     case INDEX_op_qemu_st2:
@@ -2939,7 +2974,9 @@ void tcg_dump_ops(TCGContext *s, FILE *f, bool have_prefs)
                 i = 1;
                 break;
             case INDEX_op_qemu_ld_acq:
+            case INDEX_op_qemu_ld_acq_imm:
             case INDEX_op_qemu_st_rel:
+            case INDEX_op_qemu_st_rel_imm:
             case INDEX_op_qemu_ld:
             case INDEX_op_qemu_st:
             case INDEX_op_qemu_ld2:
@@ -2965,7 +3002,12 @@ void tcg_dump_ops(TCGContext *s, FILE *f, bool have_prefs)
                         mop = get_memop(oi);
                         col += ne_fprintf(f, ",$0x%x,%u", mop, ix);
                     }
-                    i = 1;
+                    i = ((c == INDEX_op_qemu_st_rel_imm ||
+                          c == INDEX_op_qemu_ld_acq_imm) ? 2 : 1);
+                    if (c == INDEX_op_qemu_st_rel_imm ||
+                        c == INDEX_op_qemu_ld_acq_imm) {
+                        col += ne_fprintf(f, ",%d", (int32_t)op->args[k++]);
+                    }
                 }
                 break;
             case INDEX_op_bswap16:
@@ -5799,6 +5841,26 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
                 container_of(all_outop[op->opc], TCGOutOpQemuLdSt, base);
 
             out->out(s, type, new_args[0], new_args[1], new_args[2]);
+        }
+        break;
+
+    case INDEX_op_qemu_ld_acq_imm:
+        {
+            const TCGOutOpQemuLdAcqImm *out =
+                container_of(all_outop[op->opc], TCGOutOpQemuLdAcqImm, base);
+
+            out->out(s, type, new_args[0], new_args[1], new_args[2],
+                     (int32_t)new_args[3]);
+        }
+        break;
+
+    case INDEX_op_qemu_st_rel_imm:
+        {
+            const TCGOutOpQemuStRelImm *out =
+                container_of(all_outop[op->opc], TCGOutOpQemuStRelImm, base);
+
+            out->out(s, type, new_args[0], new_args[1], new_args[2],
+                     (int32_t)new_args[3]);
         }
         break;
 

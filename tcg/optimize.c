@@ -1881,6 +1881,8 @@ static void fold_mb_with_qemu_memop(OptContext *ctx, TCGOp *op, bool is_store)
 {
     TCGOp *mb = ctx->prev_mb;
     TCGBar need, have, keep;
+    TCGOpcode opc = op->opc;
+    bool already_acqrel;
 
     if (!mb || ctx->type > TCG_TYPE_REG) {
         return;
@@ -1895,7 +1897,11 @@ static void fold_mb_with_qemu_memop(OptContext *ctx, TCGOp *op, bool is_store)
         if (!need) {
             return;
         }
-        op->opc = INDEX_op_qemu_ld_acq;
+        already_acqrel = (opc == INDEX_op_qemu_ld_acq ||
+                          opc == INDEX_op_qemu_ld_acq_imm);
+        if (!already_acqrel) {
+            op->opc = INDEX_op_qemu_ld_acq;
+        }
     } else {
         if (!TCG_TARGET_HAS_st_rel) {
             return;
@@ -1904,7 +1910,11 @@ static void fold_mb_with_qemu_memop(OptContext *ctx, TCGOp *op, bool is_store)
         if (!need) {
             return;
         }
-        op->opc = INDEX_op_qemu_st_rel;
+        already_acqrel = (opc == INDEX_op_qemu_st_rel ||
+                          opc == INDEX_op_qemu_st_rel_imm);
+        if (!already_acqrel) {
+            op->opc = INDEX_op_qemu_st_rel;
+        }
     }
 
     keep = have & ~need;
@@ -2243,6 +2253,13 @@ static bool fold_qemu_st(OptContext *ctx, TCGOp *op)
     fold_qemu_memop_infer_align(op, true);
     fold_mb_with_qemu_memop(ctx, op, true);
 
+    /* Opcodes that touch guest memory stop the mb optimization.  */
+    ctx->prev_mb = NULL;
+    return true;
+}
+
+static bool fold_qemu_st_rel_imm(OptContext *ctx, TCGOp *op)
+{
     /* Opcodes that touch guest memory stop the mb optimization.  */
     ctx->prev_mb = NULL;
     return true;
@@ -3032,6 +3049,7 @@ void tcg_optimize(TCGContext *s)
             done = fold_orc(&ctx, op);
             break;
         case INDEX_op_qemu_ld:
+        case INDEX_op_qemu_ld_acq_imm:
             done = fold_qemu_ld_1reg(&ctx, op);
             break;
         case INDEX_op_qemu_ld2:
@@ -3040,6 +3058,9 @@ void tcg_optimize(TCGContext *s)
         case INDEX_op_qemu_st:
         case INDEX_op_qemu_st2:
             done = fold_qemu_st(&ctx, op);
+            break;
+        case INDEX_op_qemu_st_rel_imm:
+            done = fold_qemu_st_rel_imm(&ctx, op);
             break;
         case INDEX_op_rems:
         case INDEX_op_remu:

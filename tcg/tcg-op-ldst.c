@@ -89,19 +89,81 @@ static MemOp tcg_canonicalize_memop(MemOp op, bool is64, bool st)
     return op;
 }
 
+void tcg_set_st_rel_imm_hint(TCGTemp *addr, TCGTemp *base, int32_t disp)
+{
+    tcg_ctx->pending_st_rel_imm_valid = true;
+    tcg_ctx->pending_st_rel_imm_addr = addr;
+    tcg_ctx->pending_st_rel_imm_base = base;
+    tcg_ctx->pending_st_rel_imm_disp = disp;
+    tcg_ctx->pending_st_rel_imm_anchor = tcg_last_op();
+}
+
+void tcg_clear_st_rel_imm_hint(void)
+{
+    tcg_ctx->pending_st_rel_imm_valid = false;
+    tcg_ctx->pending_st_rel_imm_anchor = NULL;
+}
+
 static void gen_ldst1(TCGOpcode opc, TCGType type, TCGTemp *v,
                       TCGTemp *addr, MemOpIdx oi)
 {
+    bool use_ld_acq_imm = false;
+    TCGTemp *ld_acq_base = NULL;
+    int32_t ld_acq_disp = 0;
+    bool use_st_rel_imm = false;
+    TCGTemp *st_rel_base = NULL;
+    int32_t st_rel_disp = 0;
+
     if (opc == INDEX_op_qemu_ld && tcg_ctx->pending_ld_acq) {
         opc = INDEX_op_qemu_ld_acq;
         tcg_ctx->pending_ld_acq = false;
+#if TCG_TARGET_HAS_ld_acq_imm
+        if (tcg_ctx->have_ld_acq_imm &&
+            tcg_ctx->pending_st_rel_imm_valid &&
+            tcg_ctx->pending_st_rel_imm_addr == addr &&
+            tcg_ctx->pending_st_rel_imm_anchor == tcg_last_op()) {
+            use_ld_acq_imm = true;
+            /*
+             * In softmmu, use the already computed effective address register
+             * as the ld_acq_imm input.  This keeps correctness independent of
+             * base+disp hint materialization details.
+             */
+            ld_acq_base = tcg_use_softmmu ? addr
+                                          : tcg_ctx->pending_st_rel_imm_base;
+            ld_acq_disp = tcg_ctx->pending_st_rel_imm_disp;
+            opc = INDEX_op_qemu_ld_acq_imm;
+        }
+#endif
     } else if (opc == INDEX_op_qemu_st && tcg_ctx->pending_st_rel) {
         opc = INDEX_op_qemu_st_rel;
         tcg_ctx->pending_st_rel = false;
+
+#if TCG_TARGET_HAS_st_rel_imm
+        if (tcg_ctx->have_st_rel_imm &&
+            tcg_ctx->pending_st_rel_imm_valid &&
+            tcg_ctx->pending_st_rel_imm_addr == addr &&
+            tcg_ctx->pending_st_rel_imm_anchor == tcg_last_op()) {
+            use_st_rel_imm = true;
+            st_rel_base = tcg_ctx->pending_st_rel_imm_base;
+            st_rel_disp = tcg_ctx->pending_st_rel_imm_disp;
+            opc = INDEX_op_qemu_st_rel_imm;
+        }
+#endif
     }
 
-    TCGOp *op = tcg_gen_op3(opc, type, temp_arg(v), temp_arg(addr), oi);
+    TCGOp *op;
+    if (use_ld_acq_imm) {
+        op = tcg_gen_op4(opc, type, temp_arg(v), temp_arg(ld_acq_base),
+                         oi, ld_acq_disp);
+    } else if (use_st_rel_imm) {
+        op = tcg_gen_op4(opc, type, temp_arg(v), temp_arg(st_rel_base),
+                         oi, st_rel_disp);
+    } else {
+        op = tcg_gen_op3(opc, type, temp_arg(v), temp_arg(addr), oi);
+    }
     TCGOP_FLAGS(op) = get_memop(oi) & MO_SIZE;
+    tcg_ctx->pending_st_rel_imm_valid = false;
+    tcg_ctx->pending_st_rel_imm_anchor = NULL;
 }
 
 static void gen_ldst2(TCGOpcode opc, TCGType type, TCGTemp *vl, TCGTemp *vh,
@@ -110,6 +172,8 @@ static void gen_ldst2(TCGOpcode opc, TCGType type, TCGTemp *vl, TCGTemp *vh,
     TCGOp *op = tcg_gen_op4(opc, type, temp_arg(vl), temp_arg(vh),
                             temp_arg(addr), oi);
     TCGOP_FLAGS(op) = get_memop(oi) & MO_SIZE;
+    tcg_ctx->pending_st_rel_imm_valid = false;
+    tcg_ctx->pending_st_rel_imm_anchor = NULL;
 }
 
 static void gen_ld_i64(TCGv_i64 v, TCGTemp *addr, MemOpIdx oi)
