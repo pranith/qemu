@@ -353,6 +353,8 @@ struct TCGContext {
     int nb_ops;
     TCGType addr_type;            /* TCG_TYPE_I32 or TCG_TYPE_I64 */
     TCGBar guest_mo;
+    bool pending_ld_acq;
+    bool pending_st_rel;
 
     TCGRegSet reserved_regs;
     intptr_t current_frame_offset;
