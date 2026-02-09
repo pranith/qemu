@@ -448,6 +448,18 @@ typedef enum {
     I3306_LDAPRW    = 0xb8bfc000,
     I3306_LDAPRX    = 0xf8bfc000,
 
+    /* Load-acquire RCpc immediate instructions (LRCPC2). */
+    I3312_LDAPURB   = 0x19400000,
+    I3312_LDAPURH   = 0x59400000,
+    I3312_LDAPURW   = 0x99400000,
+    I3312_LDAPURX   = 0xd9400000,
+
+    /* Store-release RCpc instructions (LRCPC2). */
+    I3312_STLURB    = 0x19000000,
+    I3312_STLURH    = 0x59000000,
+    I3312_STLURW    = 0x99000000,
+    I3312_STLURX    = 0xd9000000,
+
     /* Load/store register.  Described here as 3.3.12, but the helper
        that emits them can transform to 3.3.10 or 3.3.13.  */
     I3312_STRB      = 0x38000000 | LDST_ST << 22 | MO_8 << 30,
@@ -1622,6 +1634,9 @@ static void tcg_out_qemu_ld_direct(TCGContext *s, MemOp memop, TCGType ext,
                                    TCGReg data_r, HostAddress h);
 static void tcg_out_qemu_st_direct(TCGContext *s, MemOp memop,
                                    TCGReg data_r, HostAddress h);
+static void tcg_out_qemu_ld_direct_acq(TCGContext *s, MemOp memop,
+                                       TCGType ext, TCGReg data_r,
+                                       TCGReg base_r);
 
 bool tcg_target_has_memory_bswap(MemOp memop)
 {
@@ -1638,18 +1653,19 @@ static TCGLabelQemuLdst *get_acqrel_fallback_body(TCGContext *s, bool is_ld,
                                                   TCGReg data_reg)
 {
     TCGLabelQemuLdst *lb;
-    bool ret_lr = (base_reg != TCG_REG_LR &&
-                   (!is_ld || data_reg != TCG_REG_LR));
-    bool canon = ret_lr;
+    bool ret_lr = true;
+    bool canon = true;
 
-    if (canon) {
-        /*
-         * Canonical bodies are entered via BL/RET, so keep the canonical
-         * base out of x30 (LR).
-         */
-        base_reg = TCG_REG_ACQREL_ALIGN;
-        data_reg = TCG_REG_TMP1;
-    }
+    /*
+     * Always use canonical acq/rel fallback bodies:
+     * - base in x27
+     * - data/result in x17
+     * - return via LR/RET
+     *
+     * This avoids non-canonical BR-to-arbitrary-slot returns in stubs.
+     */
+    base_reg = TCG_REG_ACQREL_ALIGN;
+    data_reg = TCG_REG_TMP1;
 
     QSIMPLEQ_FOREACH(lb, &s->ldst_labels, next) {
         if (lb->acqrel_fallback_body &&
@@ -1692,23 +1708,26 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
         h.base = lb->base_reg;
         h.index = TCG_REG_XZR;
         h.index_ext = TCG_TYPE_I64;
-        tcg_out_qemu_ld_direct(s, opc, lb->type, lb->datalo_reg, h);
-        tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
-        if (lb->acqrel_fallback_ret_lr) {
-            tcg_out_insn(s, 3207, RET, TCG_REG_LR);
-        } else {
-            tcg_out_goto_ptr(s, TCG_REG_TMP0);
-        }
+        tcg_out_qemu_ld_direct_acq(s, opc, lb->type, lb->datalo_reg, h.base);
+        tcg_out_insn(s, 3207, RET, TCG_REG_LR);
         return true;
     }
 
-    if (!reloc_pc19(lb->label_ptr[0], tcg_splitwx_to_rx(s->code_ptr))) {
+    const tcg_insn_unit *tgt = tcg_splitwx_to_rx(s->code_ptr);
+    if (!reloc_pc19(lb->label_ptr[0], tgt) ||
+        (lb->label_ptr[1] && !reloc_pc19(lb->label_ptr[1], tgt))) {
         return false;
     }
 
     if (lb->acqrel_fallback_entry) {
-        tcg_debug_assert(lb->acqrel_fallback_target != NULL);
-        if (!lb->acqrel_fallback_target->acqrel_fallback_canon &&
+        if (lb->acqrel_fallback_target == NULL) {
+            /* Softmmu misaligned acquire fallback must use helper path. */
+            tcg_out_ld_helper_args(s, lb, &ldst_helper_param);
+            tcg_out_call_int(s, qemu_ld_helpers[opc & MO_SIZE]);
+            tcg_out_ld_helper_ret(s, lb, false, &ldst_helper_param);
+            tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+            tcg_out_goto(s, lb->raddr);
+        } else if (!lb->acqrel_fallback_target->acqrel_fallback_canon &&
             lb->acqrel_fallback_target->acqrel_fallback_ret_lr &&
             lb->acqrel_fallback_target->acqrel_fallback_refcnt == 1) {
             /*
@@ -1718,9 +1737,10 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
             h.base = lb->acqrel_fallback_target->base_reg;
             h.index = TCG_REG_XZR;
             h.index_ext = TCG_TYPE_I64;
-            tcg_out_qemu_ld_direct(s, opc, lb->acqrel_fallback_target->type,
-                                   lb->acqrel_fallback_target->datalo_reg, h);
-            tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+            tcg_out_qemu_ld_direct_acq(s, opc,
+                                       lb->acqrel_fallback_target->type,
+                                       lb->acqrel_fallback_target->datalo_reg,
+                                       h.base);
             tcg_out_goto(s, lb->raddr);
         } else if (lb->acqrel_fallback_target->acqrel_fallback_canon) {
             if (lb->base_reg != TCG_REG_ACQREL_ALIGN) {
@@ -1728,15 +1748,11 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
                             TCG_REG_ACQREL_ALIGN, lb->base_reg);
             }
             tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-            if (lb->datalo_reg == TCG_REG_TMP1) {
-                tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
-                             (tcg_target_long)(uintptr_t)lb->raddr);
-                tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
-            } else {
-                tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+            if (lb->datalo_reg != TCG_REG_TMP1) {
                 tcg_out_mov(s, lb->type, lb->datalo_reg, TCG_REG_TMP1);
-                tcg_out_goto(s, lb->raddr);
             }
+            tcg_out_goto(s, lb->raddr);
         } else if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
             tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
             tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
@@ -1744,7 +1760,7 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
             tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
         } else {
             tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_TMP0,
+            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
                          (tcg_target_long)(uintptr_t)lb->raddr);
             tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
         }
@@ -1754,6 +1770,9 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
     tcg_out_ld_helper_args(s, lb, &ldst_helper_param);
     tcg_out_call_int(s, qemu_ld_helpers[opc & MO_SIZE]);
     tcg_out_ld_helper_ret(s, lb, false, &ldst_helper_param);
+    if (lb->acqrel_helper || tcg_use_softmmu) {
+        tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+    }
     tcg_out_goto(s, lb->raddr);
     return true;
 }
@@ -1776,21 +1795,24 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
         h.index_ext = TCG_TYPE_I64;
         tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
         tcg_out_qemu_st_direct(s, opc, lb->datalo_reg, h);
-        if (lb->acqrel_fallback_ret_lr) {
-            tcg_out_insn(s, 3207, RET, TCG_REG_LR);
-        } else {
-            tcg_out_goto_ptr(s, TCG_REG_TMP0);
-        }
+        tcg_out_insn(s, 3207, RET, TCG_REG_LR);
         return true;
     }
 
-    if (!reloc_pc19(lb->label_ptr[0], tcg_splitwx_to_rx(s->code_ptr))) {
+    const tcg_insn_unit *tgt = tcg_splitwx_to_rx(s->code_ptr);
+    if (!reloc_pc19(lb->label_ptr[0], tgt) ||
+        (lb->label_ptr[1] && !reloc_pc19(lb->label_ptr[1], tgt))) {
         return false;
     }
 
     if (lb->acqrel_fallback_entry) {
-        tcg_debug_assert(lb->acqrel_fallback_target != NULL);
-        if (!lb->acqrel_fallback_target->acqrel_fallback_canon &&
+        if (lb->acqrel_fallback_target == NULL) {
+            /* Softmmu misaligned release fallback must use helper path. */
+            tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+            tcg_out_st_helper_args(s, lb, &ldst_helper_param);
+            tcg_out_call_int(s, qemu_st_helpers[opc & MO_SIZE]);
+            tcg_out_goto(s, lb->raddr);
+        } else if (!lb->acqrel_fallback_target->acqrel_fallback_canon &&
             lb->acqrel_fallback_target->acqrel_fallback_ret_lr &&
             lb->acqrel_fallback_target->acqrel_fallback_refcnt == 1) {
             /*
@@ -1812,9 +1834,8 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
                 tcg_out_mov(s, lb->type, TCG_REG_TMP1, lb->datalo_reg);
             }
             tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
-                         (tcg_target_long)(uintptr_t)lb->raddr);
-            tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
+            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+            tcg_out_goto(s, lb->raddr);
         } else if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
             tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
             tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
@@ -1822,13 +1843,16 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
             tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
         } else {
             tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_TMP0,
+            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_LR,
                          (tcg_target_long)(uintptr_t)lb->raddr);
             tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
         }
         return true;
     }
 
+    if (lb->acqrel_helper || tcg_use_softmmu) {
+        tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+    }
     tcg_out_st_helper_args(s, lb, &ldst_helper_param);
     tcg_out_call_int(s, qemu_st_helpers[opc & MO_SIZE]);
     tcg_out_goto(s, lb->raddr);
@@ -1998,6 +2022,53 @@ static void tcg_out_qemu_ld_direct(TCGContext *s, MemOp memop, TCGType ext,
     }
 }
 
+static void tcg_out_qemu_ld_direct_acq(TCGContext *s, MemOp memop,
+                                       TCGType ext, TCGReg data_r,
+                                       TCGReg base_r)
+{
+    AArch64Insn insn;
+    MemOp s_bits = MO_8;
+    bool sign_ext = false;
+    bool use_ldapr = have_lrcpc2;
+
+    switch (memop & MO_SSIZE) {
+    case MO_UB:
+        insn = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
+        break;
+    case MO_SB:
+        insn = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
+        s_bits = MO_8;
+        sign_ext = true;
+        break;
+    case MO_UW:
+        insn = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
+        break;
+    case MO_SW:
+        insn = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
+        s_bits = MO_16;
+        sign_ext = true;
+        break;
+    case MO_UL:
+        insn = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
+        break;
+    case MO_SL:
+        insn = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
+        s_bits = MO_32;
+        sign_ext = true;
+        break;
+    case MO_UQ:
+        insn = use_ldapr ? I3306_LDAPRX : I3306_LDARX;
+        break;
+    default:
+        g_assert_not_reached();
+    }
+
+    tcg_out_insn_3306_aq(s, insn, data_r, base_r);
+    if (sign_ext) {
+        tcg_out_sxt(s, ext, s_bits, data_r, data_r);
+    }
+}
+
 static void tcg_out_qemu_st_direct(TCGContext *s, MemOp memop,
                                    TCGReg data_r, HostAddress h)
 {
@@ -2044,8 +2115,9 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
                              TCGReg data_reg, TCGReg addr_reg, MemOpIdx oi)
 {
     TCGLabelQemuLdst *ldst, *misalign = NULL, *body = NULL;
+    tcg_insn_unit **misalign_ptr = NULL;
     HostAddress h;
-    AArch64Insn insn;
+    AArch64Insn insn_reg;
     TCGReg base;
     MemOp memop = get_memop(oi);
     MemOp s_bits = MO_8;
@@ -2054,46 +2126,69 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     uint64_t align_mask = 0;
     bool reuse_hoist = false;
     bool can_use_ldar;
+    bool use_native_acqrel = true;
+    TCGReg align_reg = TCG_REG_ACQREL_ALIGN;
+    /* Use RCpc acquire loads for all sizes when available. */
     bool use_ldapr = have_lrcpc2;
 
     switch (memop & MO_SSIZE) {
     case MO_UB:
-        insn = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
+        insn_reg = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
         break;
     case MO_SB:
-        insn = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
+        insn_reg = use_ldapr ? I3306_LDAPRB : I3306_LDARB;
         s_bits = MO_8;
         sign_ext = true;
         break;
     case MO_UW:
-        insn = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
+        insn_reg = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
         break;
     case MO_SW:
-        insn = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
+        insn_reg = use_ldapr ? I3306_LDAPRH : I3306_LDARH;
         s_bits = MO_16;
         sign_ext = true;
         break;
     case MO_UL:
-        insn = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
+        insn_reg = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
         break;
     case MO_SL:
-        insn = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
+        insn_reg = use_ldapr ? I3306_LDAPRW : I3306_LDARW;
         s_bits = MO_32;
         sign_ext = true;
         break;
     case MO_UQ:
-        insn = use_ldapr ? I3306_LDAPRX : I3306_LDARX;
+        insn_reg = use_ldapr ? I3306_LDAPRX : I3306_LDARX;
         break;
     default:
         g_assert_not_reached();
     }
 
     ldst = prepare_host_addr(s, &h, addr_reg, oi, true);
-    can_use_ldar = use_ldapr || !size_lg || h.aa.align >= size_lg;
-    reuse_hoist = (s->acqrel_align_hoist_valid &&
-                   s->acqrel_align_hoist_addr == addr_reg &&
-                   s->acqrel_align_hoist_size_lg >= size_lg);
-    if (!can_use_ldar && size_lg) {
+    if (tcg_use_softmmu) {
+        /*
+         * In softmmu, enable native acquire loads only when LRCPC2 is
+         * available so we can emit LDAPR*; otherwise keep dmb+ldr.
+         */
+        use_native_acqrel = have_lrcpc2;
+    }
+    /*
+     * Both LDAR* and LDAPR* require natural alignment for the access size.
+     * For unknown alignment, keep the existing guarded fallback path.
+     */
+    can_use_ldar = use_native_acqrel && (!size_lg || h.aa.align >= size_lg);
+    if (tcg_use_softmmu && size_lg) {
+        /*
+         * Do not trust frontend/inferred alignment metadata in softmmu.
+         * Always keep the runtime alignment guard before LDAPR/LDAR.
+         */
+        can_use_ldar = false;
+    }
+    /*
+     * Reusing prior alignment checks via register-identity tracking has shown
+     * correctness issues in complex x86 traces. Keep the per-site check.
+     */
+    reuse_hoist = false;
+    if (!can_use_ldar && use_native_acqrel && size_lg) {
         /*
          * The translator often cannot prove alignment, but x86 code may
          * still align pointers at runtime. Fast-path aligned accesses with
@@ -2101,28 +2196,58 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
          */
         base = tcg_out_qemu_ldst_base(s, &h);
         align_mask = (1u << size_lg) - 1;
-        body = get_acqrel_fallback_body(s, true, oi, data_type, base, data_reg);
-        misalign = new_ldst_label(s);
+        if (tcg_use_softmmu && ldst != NULL) {
+            /*
+             * Coalesce softmmu TLB-miss and misalign branches to a single
+             * fallback stub: keep TLB branch in label_ptr[0] and attach
+             * misalign branch via label_ptr[1].
+             */
+            misalign = ldst;
+            misalign_ptr = &misalign->label_ptr[1];
+        } else {
+            misalign = new_ldst_label(s);
+            misalign_ptr = &misalign->label_ptr[0];
+        }
         misalign->is_ld = true;
         misalign->acqrel_fallback_entry = true;
         misalign->oi = oi;
+        misalign->type = data_type;
+        misalign->addr_reg = addr_reg;
         misalign->base_reg = base;
         misalign->datalo_reg = data_reg;
-        misalign->acqrel_fallback_target = body;
-        body->acqrel_fallback_refcnt++;
+        if (!tcg_use_softmmu) {
+            body = get_acqrel_fallback_body(s, true, oi, data_type,
+                                            base, data_reg);
+            misalign->acqrel_fallback_target = body;
+            body->acqrel_fallback_refcnt++;
+        }
+
+        /*
+         * If addr_reg itself is x27 (ACQREL_ALIGN), do not overwrite it
+         * with alignment-test bits before branching to a fallback/helper.
+         * This can happen in immediate-fallback lowering where we
+         * materialize addr+disp into x27.
+         */
+        if (addr_reg == TCG_REG_ACQREL_ALIGN) {
+            align_reg = TCG_REG_TMP1;
+        }
 
         if (reuse_hoist) {
-            misalign->label_ptr[0] = s->code_ptr;
+            tcg_debug_assert(misalign_ptr != NULL);
+            tcg_debug_assert(*misalign_ptr == NULL);
+            *misalign_ptr = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
         } else {
-            /* w_align = base & align_mask; non-zero means misaligned. */
-            tcg_out_logicali(s, I3404_ANDSI, 0,
-                             TCG_REG_ACQREL_ALIGN, base, align_mask);
-            misalign->label_ptr[0] = s->code_ptr;
-            tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
-            s->acqrel_align_hoist_valid = true;
-            s->acqrel_align_hoist_addr = addr_reg;
-            s->acqrel_align_hoist_size_lg = size_lg;
+            /*
+             * w_align = base & align_mask; non-zero means misaligned.
+             * Use AND (not ANDS) so we do not clobber NZCV between guest ops.
+             */
+            tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
+            tcg_debug_assert(misalign_ptr != NULL);
+            tcg_debug_assert(*misalign_ptr == NULL);
+            *misalign_ptr = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+            s->acqrel_align_hoist_valid = false;
         }
         can_use_ldar = true;
     } else if (can_use_ldar) {
@@ -2130,7 +2255,7 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     }
 
     if (can_use_ldar) {
-        tcg_out_insn_3306_aq(s, insn, data_reg, base);
+        tcg_out_insn_3306_aq(s, insn_reg, data_reg, base);
         if (sign_ext) {
             tcg_out_sxt(s, data_type, s_bits, data_reg, data_reg);
         }
@@ -2144,6 +2269,7 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     }
 
     if (ldst) {
+        ldst->acqrel_helper = true;
         ldst->type = data_type;
         ldst->datalo_reg = data_reg;
         ldst->raddr = tcg_splitwx_to_rx(s->code_ptr);
@@ -2153,6 +2279,191 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
 static const TCGOutOpQemuLdSt outop_qemu_ld_acq = {
     .base.static_constraint = C_O1_I1(r, r),
     .out = tgen_qemu_ld_acq,
+};
+
+static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
+                                 TCGReg data_reg, TCGReg addr_reg,
+                                 MemOpIdx oi, int32_t disp)
+{
+    MemOp memop = get_memop(oi);
+    unsigned size_lg = memop & MO_SIZE;
+    TCGAtomAlign aa;
+    MemOp s_bits = MO_8;
+    bool sign_ext = false;
+    AArch64Insn insn_imm, insn_reg;
+    TCGLabelQemuLdst *ldst;
+    TCGLabelQemuLdst *misalign = NULL;
+    tcg_insn_unit **misalign_ptr = NULL;
+    HostAddress h;
+    TCGReg base;
+    TCGReg eff_addr = addr_reg;
+    TCGReg align_reg = TCG_REG_ACQREL_ALIGN;
+    uint64_t align_mask = 0;
+
+    if (disp < -256 || disp > 255) {
+        goto fallback;
+    }
+    if (!have_lrcpc2 || s->addr_type != TCG_TYPE_I64) {
+        goto fallback;
+    }
+#ifdef CONFIG_USER_ONLY
+    if (guest_base) {
+        goto fallback;
+    }
+#endif
+    /*
+     * In softmmu, memops that are already tagged with explicit alignment
+     * are better handled by the non-imm acquire path, which keeps the
+     * host-address alignment fallback behavior used by regular ld_acq.
+     */
+    if (tcg_use_softmmu && size_lg && (memop & MO_AMASK)) {
+        goto fallback;
+    }
+    aa = atom_and_align_for_opc(s, memop,
+                                have_lse2 ? MO_ATOM_WITHIN16
+                                          : MO_ATOM_IFALIGN,
+                                false);
+    if (size_lg && aa.align < size_lg) {
+        goto fallback;
+    }
+
+    switch (memop & MO_SSIZE) {
+    case MO_UB:
+        insn_imm = I3312_LDAPURB;
+        insn_reg = I3306_LDAPRB;
+        break;
+    case MO_SB:
+        insn_imm = I3312_LDAPURB;
+        insn_reg = I3306_LDAPRB;
+        s_bits = MO_8;
+        sign_ext = true;
+        break;
+    case MO_UW:
+        insn_imm = I3312_LDAPURH;
+        insn_reg = I3306_LDAPRH;
+        break;
+    case MO_SW:
+        insn_imm = I3312_LDAPURH;
+        insn_reg = I3306_LDAPRH;
+        s_bits = MO_16;
+        sign_ext = true;
+        break;
+    case MO_UL:
+        insn_imm = I3312_LDAPURW;
+        insn_reg = I3306_LDAPRW;
+        break;
+    case MO_SL:
+        insn_imm = I3312_LDAPURW;
+        insn_reg = I3306_LDAPRW;
+        s_bits = MO_32;
+        sign_ext = true;
+        break;
+    case MO_UQ:
+        insn_imm = I3312_LDAPURX;
+        insn_reg = I3306_LDAPRX;
+        break;
+    default:
+        goto fallback;
+    }
+
+    if (!tcg_use_softmmu) {
+        if (disp == 0) {
+            tcg_out_insn_3306_aq(s, insn_reg, data_reg, addr_reg);
+        } else {
+            tcg_out_insn_3312(s, insn_imm, data_reg, addr_reg, disp);
+        }
+        if (sign_ext) {
+            tcg_out_sxt(s, data_type, s_bits, data_reg, data_reg);
+        }
+        return;
+    }
+
+    /*
+     * In softmmu, ld_acq_imm receives the guest effective address register as
+     * its input operand.  Keep full TLB/slow-path handling on that value.
+     */
+    ldst = prepare_host_addr(s, &h, eff_addr, oi, true);
+
+    base = tcg_out_qemu_ldst_base(s, &h);
+    if (size_lg) {
+        /*
+         * Do not trust inferred alignment in softmmu: mirror non-imm acq
+         * lowering and guard LDAPUR* with a runtime alignment fallback.
+         */
+        align_mask = (1u << size_lg) - 1;
+        /*
+         * In softmmu, coalesce TLB-miss and misalign branches by reusing the
+         * existing ldst label's second patch slot.
+         */
+        tcg_debug_assert(ldst != NULL);
+        misalign = ldst;
+        misalign_ptr = &misalign->label_ptr[1];
+        misalign->is_ld = true;
+        misalign->acqrel_fallback_entry = true;
+        misalign->oi = oi;
+        misalign->type = data_type;
+        misalign->addr_reg = eff_addr;
+        misalign->base_reg = base;
+        misalign->datalo_reg = data_reg;
+
+        if (eff_addr == TCG_REG_ACQREL_ALIGN) {
+            align_reg = TCG_REG_TMP1;
+        }
+        tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
+        tcg_debug_assert(*misalign_ptr == NULL);
+        *misalign_ptr = s->code_ptr;
+        tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+        s->acqrel_align_hoist_valid = false;
+    }
+
+    if (disp == 0) {
+        tcg_out_insn_3306_aq(s, insn_reg, data_reg, base);
+    } else {
+        /*
+         * In softmmu, addr_reg is already the effective address, so keep
+         * LDAPUR* form while using the computed host pointer as base.
+         */
+        tcg_out_insn_3312(s, insn_imm, data_reg, base, 0);
+    }
+    if (sign_ext) {
+        tcg_out_sxt(s, data_type, s_bits, data_reg, data_reg);
+    }
+
+    if (misalign) {
+        misalign->raddr = tcg_splitwx_to_rx(s->code_ptr);
+    }
+
+    if (ldst) {
+        ldst->acqrel_helper = true;
+        ldst->type = data_type;
+        ldst->datalo_reg = data_reg;
+        ldst->raddr = tcg_splitwx_to_rx(s->code_ptr);
+    }
+    return;
+
+fallback:
+    if (disp != 0 && !tcg_use_softmmu) {
+        /*
+         * Do not materialize into TMP2 (x30): prepare_host_addr() uses TMP2
+         * as scratch (e.g. for TLB compare masking) and would clobber the
+         * computed effective address before the actual load/store.
+         */
+        TCGReg eff_addr = TCG_REG_ACQREL_ALIGN;
+        if (disp > 0) {
+            tcg_out_insn(s, 3401, ADDI, s->addr_type,
+                         eff_addr, addr_reg, disp);
+        } else {
+            tcg_out_insn(s, 3401, SUBI, s->addr_type,
+                         eff_addr, addr_reg, -disp);
+        }
+        addr_reg = eff_addr;
+    }
+    tgen_qemu_ld_acq(s, data_type, data_reg, addr_reg, oi);
+}
+
+static const TCGOutOpQemuLdAcqImm outop_qemu_ld_acq_imm = {
+    .base.static_constraint = C_O1_I1(r, r),
+    .out = tgen_qemu_ld_acq_imm,
 };
 
 static void tgen_qemu_st(TCGContext *s, TCGType data_type, TCGReg data_reg,
@@ -2188,6 +2499,12 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
     uint64_t align_mask = 0;
     bool reuse_hoist = false;
     bool can_use_stlr;
+    /*
+     * Use native RCsc store-release (STLR*) for all store sizes, including
+     * softmmu; runtime alignment guards keep fallback correctness.
+     */
+    bool use_native_acqrel = true;
+    TCGReg align_reg = TCG_REG_ACQREL_ALIGN;
 
     switch (memop & MO_SIZE) {
     case MO_8:
@@ -2207,36 +2524,49 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
     }
 
     ldst = prepare_host_addr(s, &h, addr_reg, oi, false);
-    can_use_stlr = !size_lg || h.aa.align >= size_lg;
-    reuse_hoist = (s->acqrel_align_hoist_valid &&
-                   s->acqrel_align_hoist_addr == addr_reg &&
-                   s->acqrel_align_hoist_size_lg >= size_lg);
-    if (!can_use_stlr && size_lg) {
+    can_use_stlr = use_native_acqrel && (!size_lg || h.aa.align >= size_lg);
+    /* See tgen_qemu_ld_acq: keep per-site alignment checks for correctness. */
+    reuse_hoist = false;
+    if (!can_use_stlr && use_native_acqrel && size_lg) {
         base = tcg_out_qemu_ldst_base(s, &h);
         align_mask = (1u << size_lg) - 1;
-        body = get_acqrel_fallback_body(s, false, oi, data_type,
-                                        base, data_reg);
         misalign = new_ldst_label(s);
         misalign->is_ld = false;
         misalign->acqrel_fallback_entry = true;
         misalign->oi = oi;
+        misalign->type = data_type;
+        misalign->addr_reg = addr_reg;
         misalign->base_reg = base;
         misalign->datalo_reg = data_reg;
-        misalign->acqrel_fallback_target = body;
-        body->acqrel_fallback_refcnt++;
+        if (!tcg_use_softmmu) {
+            body = get_acqrel_fallback_body(s, false, oi, data_type,
+                                            base, data_reg);
+            misalign->acqrel_fallback_target = body;
+            body->acqrel_fallback_refcnt++;
+        }
+
+        /*
+         * If addr_reg itself is x27 (ACQREL_ALIGN), do not overwrite it
+         * with alignment-test bits before branching to a fallback/helper.
+         * This can happen in immediate-fallback lowering where we
+         * materialize addr+disp into x27.
+         */
+        if (addr_reg == TCG_REG_ACQREL_ALIGN) {
+            align_reg = TCG_REG_TMP1;
+        }
 
         if (reuse_hoist) {
             misalign->label_ptr[0] = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
         } else {
-            /* w_align = base & align_mask; non-zero means misaligned. */
-            tcg_out_logicali(s, I3404_ANDSI, 0,
-                             TCG_REG_ACQREL_ALIGN, base, align_mask);
+            /*
+             * w_align = base & align_mask; non-zero means misaligned.
+             * Use AND (not ANDS) so we do not clobber NZCV between guest ops.
+             */
+            tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
             misalign->label_ptr[0] = s->code_ptr;
-            tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
-            s->acqrel_align_hoist_valid = true;
-            s->acqrel_align_hoist_addr = addr_reg;
-            s->acqrel_align_hoist_size_lg = size_lg;
+            tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+            s->acqrel_align_hoist_valid = false;
         }
         can_use_stlr = true;
     } else if (can_use_stlr) {
@@ -2255,6 +2585,7 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
     }
 
     if (ldst) {
+        ldst->acqrel_helper = true;
         ldst->type = data_type;
         ldst->datalo_reg = data_reg;
         ldst->raddr = tcg_splitwx_to_rx(s->code_ptr);
@@ -2264,6 +2595,153 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
 static const TCGOutOpQemuLdSt outop_qemu_st_rel = {
     .base.static_constraint = C_O0_I2(rz, r),
     .out = tgen_qemu_st_rel,
+};
+
+static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
+                                 TCGReg data_reg, TCGReg addr_reg,
+                                 MemOpIdx oi, int32_t disp)
+{
+    MemOp memop = get_memop(oi);
+    unsigned size_lg = memop & MO_SIZE;
+    TCGAtomAlign aa;
+    AArch64Insn insn_imm, insn_reg;
+    TCGLabelQemuLdst *ldst;
+    TCGLabelQemuLdst *misalign = NULL;
+    tcg_insn_unit **misalign_ptr = NULL;
+    HostAddress h;
+    TCGReg base;
+    TCGReg eff_addr = addr_reg;
+    TCGReg align_reg = TCG_REG_ACQREL_ALIGN;
+    uint64_t align_mask = 0;
+
+    if (disp < -256 || disp > 255) {
+        goto fallback;
+    }
+    if (!have_lrcpc2 || s->addr_type != TCG_TYPE_I64) {
+        goto fallback;
+    }
+#ifdef CONFIG_USER_ONLY
+    if (guest_base) {
+        goto fallback;
+    }
+#endif
+
+    switch (memop & MO_SIZE) {
+    case MO_8:
+        insn_imm = I3312_STLURB;
+        insn_reg = I3306_STLRB;
+        break;
+    case MO_16:
+        insn_imm = I3312_STLURH;
+        insn_reg = I3306_STLRH;
+        break;
+    case MO_32:
+        insn_imm = I3312_STLURW;
+        insn_reg = I3306_STLRW;
+        break;
+    case MO_64:
+        insn_imm = I3312_STLURX;
+        insn_reg = I3306_STLRX;
+        break;
+    default:
+        goto fallback;
+    }
+
+    if (!tcg_use_softmmu) {
+        if (disp == 0) {
+            tcg_out_insn_3306_aq(s, insn_reg, data_reg, addr_reg);
+        } else {
+            tcg_out_insn_3312(s, insn_imm, data_reg, addr_reg, disp);
+        }
+        return;
+    }
+
+    /*
+     * If the operation still needs runtime alignment enforcement,
+     * keep the existing lowering, which includes the slow-path guards.
+     */
+    aa = atom_and_align_for_opc(s, memop,
+                                have_lse2 ? MO_ATOM_WITHIN16
+                                          : MO_ATOM_IFALIGN,
+                                false);
+    if (aa.align < size_lg) {
+        goto fallback;
+    }
+
+    ldst = prepare_host_addr(s, &h, eff_addr, oi, false);
+    base = tcg_out_qemu_ldst_base(s, &h);
+    if (size_lg) {
+        /*
+         * Mirror ld_acq_imm softmmu behavior: do not rely solely on inferred
+         * alignment, keep a runtime alignment check before STLR/STLUR.
+         */
+        align_mask = (1u << size_lg) - 1;
+        tcg_debug_assert(ldst != NULL);
+        misalign = ldst;
+        misalign_ptr = &misalign->label_ptr[1];
+        misalign->is_ld = false;
+        misalign->acqrel_fallback_entry = true;
+        misalign->oi = oi;
+        misalign->type = data_type;
+        misalign->addr_reg = eff_addr;
+        misalign->base_reg = base;
+        misalign->datalo_reg = data_reg;
+
+        if (eff_addr == TCG_REG_ACQREL_ALIGN) {
+            align_reg = TCG_REG_TMP1;
+        }
+        tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
+        tcg_debug_assert(*misalign_ptr == NULL);
+        *misalign_ptr = s->code_ptr;
+        tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+        s->acqrel_align_hoist_valid = false;
+    }
+
+    if (disp == 0) {
+        tcg_out_insn_3306_aq(s, insn_reg, data_reg, base);
+    } else {
+        /*
+         * In softmmu, addr_reg is already the effective address, so keep
+         * STLUR* form while using the computed host pointer as base.
+         */
+        tcg_out_insn_3312(s, insn_imm, data_reg, base, 0);
+    }
+
+    if (misalign) {
+        misalign->raddr = tcg_splitwx_to_rx(s->code_ptr);
+    }
+
+    if (ldst) {
+        ldst->acqrel_helper = true;
+        ldst->type = data_type;
+        ldst->datalo_reg = data_reg;
+        ldst->raddr = tcg_splitwx_to_rx(s->code_ptr);
+    }
+    return;
+
+fallback:
+    if (disp != 0) {
+        /*
+         * Do not materialize into TMP2 (x30): prepare_host_addr() uses TMP2
+         * as scratch (e.g. for TLB compare masking) and would clobber the
+         * computed effective address before the actual load/store.
+         */
+        TCGReg eff_addr = TCG_REG_ACQREL_ALIGN;
+        if (disp > 0) {
+            tcg_out_insn(s, 3401, ADDI, s->addr_type,
+                         eff_addr, addr_reg, disp);
+        } else {
+            tcg_out_insn(s, 3401, SUBI, s->addr_type,
+                         eff_addr, addr_reg, -disp);
+        }
+        addr_reg = eff_addr;
+    }
+    tgen_qemu_st_rel(s, data_type, data_reg, addr_reg, oi);
+}
+
+static const TCGOutOpQemuStRelImm outop_qemu_st_rel_imm = {
+    .base.static_constraint = C_O0_I2(rz, r),
+    .out = tgen_qemu_st_rel_imm,
 };
 
 static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
@@ -3810,6 +4288,10 @@ tcg_target_op_def(TCGOpcode op, TCGType type, unsigned flags)
 
 static void tcg_target_init(TCGContext *s)
 {
+    /* Load-acquire immediate lowering is available with LRCPC2. */
+    s->have_ld_acq_imm = have_lrcpc2;
+    s->have_st_rel_imm = have_lrcpc2;
+
     tcg_target_available_regs[TCG_TYPE_I32] = 0xffffffffu;
     tcg_target_available_regs[TCG_TYPE_I64] = 0xffffffffu;
     tcg_target_available_regs[TCG_TYPE_V64] = 0xffffffff00000000ull;
