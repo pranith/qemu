@@ -86,6 +86,7 @@ static TCGReg tcg_target_call_oarg_reg(TCGCallReturnKind kind, int slot)
 #define TCG_REG_TMP0 TCG_REG_X16
 #define TCG_REG_TMP1 TCG_REG_X17
 #define TCG_REG_TMP2 TCG_REG_X30
+#define TCG_REG_ACQREL_ALIGN TCG_REG_X27
 #define TCG_VEC_TMP0 TCG_REG_V31
 
 #define TCG_REG_GUEST_BASE TCG_REG_X28
@@ -1611,6 +1612,11 @@ typedef struct {
     TCGAtomAlign aa;
 } HostAddress;
 
+static void tcg_out_qemu_ld_direct(TCGContext *s, MemOp memop, TCGType ext,
+                                   TCGReg data_r, HostAddress h);
+static void tcg_out_qemu_st_direct(TCGContext *s, MemOp memop,
+                                   TCGReg data_r, HostAddress h);
+
 bool tcg_target_has_memory_bswap(MemOp memop)
 {
     return false;
@@ -1620,12 +1626,74 @@ static const TCGLdstHelperParam ldst_helper_param = {
     .ntmp = 1, .tmp = { TCG_REG_TMP0 }
 };
 
+static TCGLabelQemuLdst *get_acqrel_fallback_body(TCGContext *s, bool is_ld,
+                                                  MemOpIdx oi, TCGType type,
+                                                  TCGReg base_reg,
+                                                  TCGReg data_reg)
+{
+    TCGLabelQemuLdst *lb;
+    bool ret_lr = (base_reg != TCG_REG_LR &&
+                   (!is_ld || data_reg != TCG_REG_LR));
+
+    QSIMPLEQ_FOREACH(lb, &s->ldst_labels, next) {
+        if (lb->acqrel_fallback_body &&
+            lb->is_ld == is_ld &&
+            lb->acqrel_fallback_ret_lr == ret_lr &&
+            lb->oi == oi &&
+            lb->type == type &&
+            lb->base_reg == base_reg &&
+            lb->datalo_reg == data_reg) {
+            return lb;
+        }
+    }
+
+    lb = new_ldst_label(s);
+    lb->is_ld = is_ld;
+    lb->acqrel_fallback_body = true;
+    lb->acqrel_fallback_ret_lr = ret_lr;
+    lb->oi = oi;
+    lb->type = type;
+    lb->base_reg = base_reg;
+    lb->datalo_reg = data_reg;
+    return lb;
+}
+
 static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
 {
     MemOp opc = get_memop(lb->oi);
+    HostAddress h;
+
+    if (lb->acqrel_fallback_body) {
+        lb->raddr = tcg_splitwx_to_rx(s->code_ptr);
+        h.base = lb->base_reg;
+        h.index = TCG_REG_XZR;
+        h.index_ext = TCG_TYPE_I64;
+        tcg_out_qemu_ld_direct(s, opc, lb->type, lb->datalo_reg, h);
+        tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+        if (lb->acqrel_fallback_ret_lr) {
+            tcg_out_insn(s, 3207, RET, TCG_REG_LR);
+        } else {
+            tcg_out_goto_ptr(s, TCG_REG_TMP0);
+        }
+        return true;
+    }
 
     if (!reloc_pc19(lb->label_ptr[0], tcg_splitwx_to_rx(s->code_ptr))) {
         return false;
+    }
+
+    if (lb->acqrel_fallback_entry) {
+        tcg_debug_assert(lb->acqrel_fallback_target != NULL);
+        tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
+        if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
+            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+            tcg_out_goto(s, lb->raddr);
+        } else {
+            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_TMP0,
+                         (tcg_target_long)(uintptr_t)lb->raddr);
+            tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
+        }
+        return true;
     }
 
     tcg_out_ld_helper_args(s, lb, &ldst_helper_param);
@@ -1638,9 +1706,39 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
 static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
 {
     MemOp opc = get_memop(lb->oi);
+    HostAddress h;
+
+    if (lb->acqrel_fallback_body) {
+        lb->raddr = tcg_splitwx_to_rx(s->code_ptr);
+        h.base = lb->base_reg;
+        h.index = TCG_REG_XZR;
+        h.index_ext = TCG_TYPE_I64;
+        tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+        tcg_out_qemu_st_direct(s, opc, lb->datalo_reg, h);
+        if (lb->acqrel_fallback_ret_lr) {
+            tcg_out_insn(s, 3207, RET, TCG_REG_LR);
+        } else {
+            tcg_out_goto_ptr(s, TCG_REG_TMP0);
+        }
+        return true;
+    }
 
     if (!reloc_pc19(lb->label_ptr[0], tcg_splitwx_to_rx(s->code_ptr))) {
         return false;
+    }
+
+    if (lb->acqrel_fallback_entry) {
+        tcg_debug_assert(lb->acqrel_fallback_target != NULL);
+        tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
+        if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
+            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+            tcg_out_goto(s, lb->raddr);
+        } else {
+            tcg_out_movi(s, TCG_TYPE_PTR, TCG_REG_TMP0,
+                         (tcg_target_long)(uintptr_t)lb->raddr);
+            tcg_out_goto(s, lb->acqrel_fallback_target->raddr);
+        }
+        return true;
     }
 
     tcg_out_st_helper_args(s, lb, &ldst_helper_param);
@@ -1857,13 +1955,16 @@ static const TCGOutOpQemuLdSt outop_qemu_ld = {
 static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
                              TCGReg data_reg, TCGReg addr_reg, MemOpIdx oi)
 {
-    TCGLabelQemuLdst *ldst;
+    TCGLabelQemuLdst *ldst, *misalign = NULL, *body = NULL;
     HostAddress h;
     AArch64Insn insn;
     TCGReg base;
     MemOp memop = get_memop(oi);
     MemOp s_bits = MO_8;
     bool sign_ext = false;
+    unsigned size_lg = memop & MO_SIZE;
+    uint64_t align_mask = 0;
+    bool reuse_hoist = false;
     bool can_use_ldar;
 
     switch (memop & MO_SSIZE) {
@@ -1899,9 +2000,44 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     }
 
     ldst = prepare_host_addr(s, &h, addr_reg, oi, true);
-    can_use_ldar = !(memop & MO_SIZE) || h.aa.align >= (memop & MO_SIZE);
-    if (can_use_ldar) {
+    can_use_ldar = !size_lg || h.aa.align >= size_lg;
+    reuse_hoist = (s->acqrel_align_hoist_valid &&
+                   s->acqrel_align_hoist_addr == addr_reg &&
+                   s->acqrel_align_hoist_size_lg == size_lg);
+    if (!can_use_ldar && size_lg) {
+        /*
+         * The translator often cannot prove alignment, but x86 code may
+         * still align pointers at runtime. Fast-path aligned accesses with
+         * LDAR* and keep the existing fallback for misalignment.
+         */
         base = tcg_out_qemu_ldst_base(s, &h);
+        align_mask = (1u << size_lg) - 1;
+        body = get_acqrel_fallback_body(s, true, oi, data_type, base, data_reg);
+        misalign = new_ldst_label(s);
+        misalign->is_ld = true;
+        misalign->acqrel_fallback_entry = true;
+        misalign->oi = oi;
+        misalign->acqrel_fallback_target = body;
+
+        if (reuse_hoist) {
+            misalign->label_ptr[0] = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+        } else {
+            /* w_align = base & align_mask; non-zero means misaligned. */
+            tcg_out_logicali(s, I3404_ANDI, TCG_TYPE_I64,
+                             TCG_REG_ACQREL_ALIGN, base, align_mask);
+            misalign->label_ptr[0] = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+            s->acqrel_align_hoist_valid = true;
+            s->acqrel_align_hoist_addr = addr_reg;
+            s->acqrel_align_hoist_size_lg = size_lg;
+        }
+        can_use_ldar = true;
+    } else if (can_use_ldar) {
+        base = tcg_out_qemu_ldst_base(s, &h);
+    }
+
+    if (can_use_ldar) {
         tcg_out_insn_3306_aq(s, insn, data_reg, base);
         if (sign_ext) {
             tcg_out_sxt(s, data_type, s_bits, data_reg, data_reg);
@@ -1909,6 +2045,10 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     } else {
         tcg_out_qemu_ld_direct(s, memop, data_type, data_reg, h);
         tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+    }
+
+    if (misalign) {
+        misalign->raddr = tcg_splitwx_to_rx(s->code_ptr);
     }
 
     if (ldst) {
@@ -1947,11 +2087,14 @@ static const TCGOutOpQemuLdSt outop_qemu_st = {
 static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
                              TCGReg data_reg, TCGReg addr_reg, MemOpIdx oi)
 {
-    TCGLabelQemuLdst *ldst;
+    TCGLabelQemuLdst *ldst, *misalign = NULL, *body = NULL;
     HostAddress h;
     AArch64Insn insn;
     TCGReg base;
     MemOp memop = get_memop(oi);
+    unsigned size_lg = memop & MO_SIZE;
+    uint64_t align_mask = 0;
+    bool reuse_hoist = false;
     bool can_use_stlr;
 
     switch (memop & MO_SIZE) {
@@ -1972,13 +2115,48 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
     }
 
     ldst = prepare_host_addr(s, &h, addr_reg, oi, false);
-    can_use_stlr = !(memop & MO_SIZE) || h.aa.align >= (memop & MO_SIZE);
-    if (can_use_stlr) {
+    can_use_stlr = !size_lg || h.aa.align >= size_lg;
+    reuse_hoist = (s->acqrel_align_hoist_valid &&
+                   s->acqrel_align_hoist_addr == addr_reg &&
+                   s->acqrel_align_hoist_size_lg == size_lg);
+    if (!can_use_stlr && size_lg) {
         base = tcg_out_qemu_ldst_base(s, &h);
+        align_mask = (1u << size_lg) - 1;
+        body = get_acqrel_fallback_body(s, false, oi, data_type,
+                                        base, data_reg);
+        misalign = new_ldst_label(s);
+        misalign->is_ld = false;
+        misalign->acqrel_fallback_entry = true;
+        misalign->oi = oi;
+        misalign->acqrel_fallback_target = body;
+
+        if (reuse_hoist) {
+            misalign->label_ptr[0] = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+        } else {
+            /* w_align = base & align_mask; non-zero means misaligned. */
+            tcg_out_logicali(s, I3404_ANDI, TCG_TYPE_I64,
+                             TCG_REG_ACQREL_ALIGN, base, align_mask);
+            misalign->label_ptr[0] = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+            s->acqrel_align_hoist_valid = true;
+            s->acqrel_align_hoist_addr = addr_reg;
+            s->acqrel_align_hoist_size_lg = size_lg;
+        }
+        can_use_stlr = true;
+    } else if (can_use_stlr) {
+        base = tcg_out_qemu_ldst_base(s, &h);
+    }
+
+    if (can_use_stlr) {
         tcg_out_insn_3306_aq(s, insn, data_reg, base);
     } else {
         tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
         tcg_out_qemu_st_direct(s, memop, data_reg, h);
+    }
+
+    if (misalign) {
+        misalign->raddr = tcg_splitwx_to_rx(s->code_ptr);
     }
 
     if (ldst) {
@@ -3567,6 +3745,7 @@ static void tcg_target_init(TCGContext *s)
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_SP);
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_FP);
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_X18); /* platform register */
+    tcg_regset_set_reg(s->reserved_regs, TCG_REG_ACQREL_ALIGN);
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_TMP0);
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_TMP1);
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_TMP2);
