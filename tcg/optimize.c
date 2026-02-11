@@ -3067,6 +3067,7 @@ void tcg_optimize(TCGContext *s)
             done = fold_orc(&ctx, op);
             break;
         case INDEX_op_qemu_ld:
+        case INDEX_op_qemu_ld_acq:
         case INDEX_op_qemu_ld_acq_imm:
             done = fold_qemu_ld_1reg(&ctx, op);
             break;
@@ -3074,6 +3075,7 @@ void tcg_optimize(TCGContext *s)
             done = fold_qemu_ld_2reg(&ctx, op);
             break;
         case INDEX_op_qemu_st:
+        case INDEX_op_qemu_st_rel:
         case INDEX_op_qemu_st2:
             done = fold_qemu_st(&ctx, op);
             break;
