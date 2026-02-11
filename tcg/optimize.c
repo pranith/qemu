@@ -1936,17 +1936,33 @@ static void fold_qemu_memop_infer_align(TCGOp *op, bool is_store)
 {
     const TCGOpDef *def = &tcg_op_defs[op->opc];
     unsigned oi_arg = def->nb_oargs + def->nb_iargs;
-    unsigned addr_arg = def->nb_oargs + (is_store ? def->nb_iargs - 1 : 0);
     MemOpIdx oi = op->args[oi_arg];
     MemOp mop = get_memop(oi);
     unsigned size_lg = mop & MO_SIZE;
+    unsigned addr_arg;
+    int32_t disp = 0;
     uint64_t req_mask;
 
     if (!size_lg || (mop & MO_AMASK) || (mop & MO_ALIGN_TLB_ONLY)) {
         return;
     }
 
+    /*
+     * For *_imm ops, infer alignment from base+disp, not just base.
+     * For non-imm ops, keep existing address-operand selection.
+     */
+    if (op->opc == INDEX_op_qemu_ld_acq_imm ||
+        op->opc == INDEX_op_qemu_st_rel_imm) {
+        addr_arg = def->nb_oargs;
+        disp = (int32_t)op->args[oi_arg + 1];
+    } else {
+        addr_arg = def->nb_oargs + (is_store ? def->nb_iargs - 1 : 0);
+    }
+
     req_mask = MAKE_64BIT_MASK(0, size_lg);
+    if ((disp & req_mask) != 0) {
+        return;
+    }
     if ((arg_info(op->args[addr_arg])->z_mask & req_mask) != 0) {
         return;
     }
@@ -2260,6 +2276,8 @@ static bool fold_qemu_st(OptContext *ctx, TCGOp *op)
 
 static bool fold_qemu_st_rel_imm(OptContext *ctx, TCGOp *op)
 {
+    fold_qemu_memop_infer_align(op, true);
+
     /* Opcodes that touch guest memory stop the mb optimization.  */
     ctx->prev_mb = NULL;
     return true;
