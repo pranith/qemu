@@ -1942,6 +1942,7 @@ static void fold_qemu_memop_infer_align(TCGOp *op, bool is_store)
     unsigned addr_arg;
     int32_t disp = 0;
     uint64_t req_mask;
+    uint64_t z_mask;
 
     if (!size_lg || (mop & MO_AMASK) || (mop & MO_ALIGN_TLB_ONLY)) {
         return;
@@ -1954,17 +1955,34 @@ static void fold_qemu_memop_infer_align(TCGOp *op, bool is_store)
     if (op->opc == INDEX_op_qemu_ld_acq_imm ||
         op->opc == INDEX_op_qemu_st_rel_imm) {
         addr_arg = def->nb_oargs;
-        disp = (int32_t)op->args[oi_arg + 1];
+        /*
+         * In softmmu, *_imm lowering uses the effective guest address as the
+         * input operand already, so alignment inference must not add disp
+         * again.
+         */
+        disp = tcg_use_softmmu ? 0 : (int32_t)op->args[oi_arg + 1];
     } else {
         addr_arg = def->nb_oargs + (is_store ? def->nb_iargs - 1 : 0);
     }
 
     req_mask = MAKE_64BIT_MASK(0, size_lg);
-    if ((disp & req_mask) != 0) {
-        return;
-    }
-    if ((arg_info(op->args[addr_arg])->z_mask & req_mask) != 0) {
-        return;
+    z_mask = arg_info(op->args[addr_arg])->z_mask;
+
+    /*
+     * Conservative default: low address bits must be known zero and any
+     * immediate displacement must preserve that alignment.
+     */
+    if ((disp & req_mask) != 0 || (z_mask & req_mask) != 0) {
+        /*
+         * Additional safe case: exact constant base address.
+         * If base+disp is aligned, we may still mark MO_ALIGN even when the
+         * low bits are not all zero.
+         */
+        if (!arg_is_const(op->args[addr_arg]) ||
+            ((arg_const_val(op->args[addr_arg]) + (uint64_t)disp) &
+             req_mask) != 0) {
+            return;
+        }
     }
 
     op->args[oi_arg] = make_memop_idx((mop & ~MO_AMASK) | MO_ALIGN,
