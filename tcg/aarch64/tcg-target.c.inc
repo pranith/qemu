@@ -430,6 +430,10 @@ typedef enum {
     /* Load/store exclusive. */
     I3306_LDXP      = 0xc8600000,
     I3306_STXP      = 0xc8200000,
+    I3306_CASP      = 0x48207c00,
+    I3306_CASPA     = 0x48607c00,
+    I3306_CASPL     = 0x4820fc00,
+    I3306_CASPAL    = 0x4860fc00,
 
     /* Load-acquire, store-release instructions */
     I3306_STLRB     = 0x089ffc00,
@@ -707,6 +711,18 @@ static void tcg_out_insn_3306(TCGContext *s, AArch64Insn insn, TCGReg rs,
                               TCGReg rt, TCGReg rt2, TCGReg rn)
 {
     tcg_out32(s, insn | rs << 16 | rt2 << 10 | rn << 5 | rt);
+}
+
+/*
+ * CASP* encodes register pairs with Rt2/Rs2 implied as Rt+1/Rs+1 and with a
+ * fixed Rt2 field in the opcode.
+ */
+static void tcg_out_insn_3306_casp(TCGContext *s, AArch64Insn insn,
+                                   TCGReg rs, TCGReg rt, TCGReg rn)
+{
+    tcg_debug_assert((rs & 1) == 0);
+    tcg_debug_assert((rt & 1) == 0);
+    tcg_out32(s, insn | rs << 16 | rn << 5 | rt);
 }
 
 static void tcg_out_insn_3306_aq(TCGContext *s, AArch64Insn insn, TCGReg rt,
@@ -2787,7 +2803,7 @@ static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
     TCGLabelQemuLdst *ldst;
     HostAddress h;
     TCGReg base;
-    bool use_pair;
+    bool use_pair, use_lse;
 
     ldst = prepare_host_addr(s, &h, addr_reg, oi, is_ld);
 
@@ -2807,6 +2823,7 @@ static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
     }
 
     use_pair = h.aa.atom < MO_128 || have_lse2;
+    use_lse = !use_pair && have_lse;
 
     if (!use_pair) {
         tcg_insn_unit *branch = NULL;
@@ -2828,7 +2845,42 @@ static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
             use_pair = true;
         }
 
-        if (is_ld) {
+        if (is_ld && use_lse) {
+            /*
+             * With FEAT_LSE (without FEAT_LSE2), use CASP for atomic 16-byte
+             * load. Use TMP0/TMP1 for the CASP pair and move the result to
+             * the requested destination registers afterwards.
+             */
+            if (base == TCG_REG_TMP0 || base == TCG_REG_TMP1) {
+                tcg_out_mov(s, TCG_TYPE_REG, TCG_REG_TMP2, base);
+                base = TCG_REG_TMP2;
+            }
+            tcg_out_insn_3306_casp(s, I3306_CASP,
+                                   TCG_REG_TMP0, TCG_REG_TMP0, base);
+
+            if (datalo == TCG_REG_TMP1 && datahi == TCG_REG_TMP0) {
+                tcg_out_mov(s, TCG_TYPE_REG, TCG_REG_TMP2, TCG_REG_TMP0);
+                tcg_out_mov(s, TCG_TYPE_REG, TCG_REG_TMP0, TCG_REG_TMP1);
+                tcg_out_mov(s, TCG_TYPE_REG, TCG_REG_TMP1, TCG_REG_TMP2);
+            } else if (datalo == TCG_REG_TMP1) {
+                if (datahi != TCG_REG_TMP1) {
+                    tcg_out_mov(s, TCG_TYPE_REG, datahi, TCG_REG_TMP1);
+                }
+                tcg_out_mov(s, TCG_TYPE_REG, datalo, TCG_REG_TMP0);
+            } else if (datahi == TCG_REG_TMP0) {
+                if (datalo != TCG_REG_TMP0) {
+                    tcg_out_mov(s, TCG_TYPE_REG, datalo, TCG_REG_TMP0);
+                }
+                tcg_out_mov(s, TCG_TYPE_REG, datahi, TCG_REG_TMP1);
+            } else {
+                if (datalo != TCG_REG_TMP0) {
+                    tcg_out_mov(s, TCG_TYPE_REG, datalo, TCG_REG_TMP0);
+                }
+                if (datahi != TCG_REG_TMP1) {
+                    tcg_out_mov(s, TCG_TYPE_REG, datahi, TCG_REG_TMP1);
+                }
+            }
+        } else if (is_ld) {
             /*
              * 16-byte atomicity without LSE2 requires LDXP+STXP loop:
              *    ldxp lo, hi, [base]
@@ -2842,6 +2894,9 @@ static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
             }
             ll = sl = datalo;
             lh = sh = datahi;
+            tcg_out_insn(s, 3306, LDXP, TCG_REG_XZR, ll, lh, base);
+            tcg_out_insn(s, 3306, STXP, TCG_REG_TMP0, sl, sh, base);
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP0, -2);
         } else {
             /*
              * 16-byte atomicity without LSE2 requires LDXP+STXP loop:
@@ -2854,11 +2909,10 @@ static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
             lh = TCG_REG_TMP1;
             sl = datalo;
             sh = datahi;
+            tcg_out_insn(s, 3306, LDXP, TCG_REG_XZR, ll, lh, base);
+            tcg_out_insn(s, 3306, STXP, TCG_REG_TMP0, sl, sh, base);
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP0, -2);
         }
-
-        tcg_out_insn(s, 3306, LDXP, TCG_REG_XZR, ll, lh, base);
-        tcg_out_insn(s, 3306, STXP, TCG_REG_TMP0, sl, sh, base);
-        tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP0, -2);
 
         if (use_pair) {
             /* "b .+8", branching across the one insn of use_pair. */
