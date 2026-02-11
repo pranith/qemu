@@ -2177,13 +2177,14 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
      */
     can_use_ldar = use_native_acqrel && (!size_lg || h.aa.align >= size_lg);
     /*
-     * Reuse a prior runtime alignment check only for the same address reg
-     * and same access size. This avoids duplicate guard sequences while
-     * staying conservative.
+     * Reuse only for the same checked address register, size, memop context
+     * and access direction.
      */
     reuse_hoist = (s->acqrel_align_hoist_valid &&
+                   s->acqrel_align_hoist_is_ld &&
                    s->acqrel_align_hoist_addr == addr_reg &&
-                   s->acqrel_align_hoist_size_lg == size_lg);
+                   s->acqrel_align_hoist_size_lg == size_lg &&
+                   s->acqrel_align_hoist_oi == oi);
     if (!can_use_ldar && use_native_acqrel && size_lg) {
         /*
          * The translator often cannot prove alignment, but x86 code may
@@ -2245,8 +2246,10 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
             tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
             if (align_reg == TCG_REG_ACQREL_ALIGN) {
                 s->acqrel_align_hoist_valid = true;
+                s->acqrel_align_hoist_is_ld = true;
                 s->acqrel_align_hoist_addr = addr_reg;
                 s->acqrel_align_hoist_size_lg = size_lg;
+                s->acqrel_align_hoist_oi = oi;
             } else {
                 s->acqrel_align_hoist_valid = false;
             }
@@ -2530,10 +2533,12 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
 
     ldst = prepare_host_addr(s, &h, addr_reg, oi, false);
     can_use_stlr = use_native_acqrel && (!size_lg || h.aa.align >= size_lg);
-    /* See tgen_qemu_ld_acq: conservative same-reg/same-size reuse only. */
+    /* See tgen_qemu_ld_acq: conservative reuse with exact context match. */
     reuse_hoist = (s->acqrel_align_hoist_valid &&
+                   !s->acqrel_align_hoist_is_ld &&
                    s->acqrel_align_hoist_addr == addr_reg &&
-                   s->acqrel_align_hoist_size_lg == size_lg);
+                   s->acqrel_align_hoist_size_lg == size_lg &&
+                   s->acqrel_align_hoist_oi == oi);
     if (!can_use_stlr && use_native_acqrel && size_lg) {
         base = tcg_out_qemu_ldst_base(s, &h);
         align_mask = (1u << size_lg) - 1;
@@ -2590,8 +2595,10 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
             tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
             if (align_reg == TCG_REG_ACQREL_ALIGN) {
                 s->acqrel_align_hoist_valid = true;
+                s->acqrel_align_hoist_is_ld = false;
                 s->acqrel_align_hoist_addr = addr_reg;
                 s->acqrel_align_hoist_size_lg = size_lg;
+                s->acqrel_align_hoist_oi = oi;
             } else {
                 s->acqrel_align_hoist_valid = false;
             }

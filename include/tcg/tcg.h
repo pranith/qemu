@@ -363,8 +363,10 @@ struct TCGContext {
     int32_t pending_st_rel_imm_disp;
     TCGOp *pending_st_rel_imm_anchor;
     bool acqrel_align_hoist_valid;
+    bool acqrel_align_hoist_is_ld;
     TCGReg acqrel_align_hoist_addr;
     unsigned acqrel_align_hoist_size_lg;
+    MemOpIdx acqrel_align_hoist_oi;
 
     TCGRegSet reserved_regs;
     intptr_t current_frame_offset;
