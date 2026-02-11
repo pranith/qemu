@@ -2176,13 +2176,6 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
      * For unknown alignment, keep the existing guarded fallback path.
      */
     can_use_ldar = use_native_acqrel && (!size_lg || h.aa.align >= size_lg);
-    if (tcg_use_softmmu && size_lg) {
-        /*
-         * Do not trust frontend/inferred alignment metadata in softmmu.
-         * Always keep the runtime alignment guard before LDAPR/LDAR.
-         */
-        can_use_ldar = false;
-    }
     /*
      * Reusing prior alignment checks via register-identity tracking has shown
      * correctness issues in complex x86 traces. Keep the per-site check.
@@ -2386,10 +2379,10 @@ static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
     ldst = prepare_host_addr(s, &h, eff_addr, oi, true);
 
     base = tcg_out_qemu_ldst_base(s, &h);
-    if (size_lg) {
+    if (size_lg && h.aa.align < size_lg) {
         /*
-         * Do not trust inferred alignment in softmmu: mirror non-imm acq
-         * lowering and guard LDAPUR* with a runtime alignment fallback.
+         * If alignment metadata is insufficient, guard LDAPR/LDAPUR and
+         * branch to the existing slow path on misalignment.
          */
         align_mask = (1u << size_lg) - 1;
         /*
@@ -2673,10 +2666,10 @@ static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
 
     ldst = prepare_host_addr(s, &h, eff_addr, oi, false);
     base = tcg_out_qemu_ldst_base(s, &h);
-    if (size_lg) {
+    if (size_lg && h.aa.align < size_lg) {
         /*
-         * Mirror ld_acq_imm softmmu behavior: do not rely solely on inferred
-         * alignment, keep a runtime alignment check before STLR/STLUR.
+         * If alignment metadata is insufficient, guard STLR/STLUR and
+         * branch to the existing slow path on misalignment.
          */
         align_mask = (1u << size_lg) - 1;
         tcg_debug_assert(ldst != NULL);
