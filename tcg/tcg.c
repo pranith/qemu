@@ -235,6 +235,72 @@ static void * const qemu_st_helpers[MO_SIZE + 1] __attribute__((unused)) = {
     [MO_128] = helper_st16_mmu,
 };
 
+static void * const qemu_atomic_cmpxchg_helpers[(MO_SIZE | MO_BSWAP) + 1]
+    __attribute__((unused)) = {
+    [MO_8] = helper_atomic_cmpxchgb,
+    [MO_16 | MO_LE] = helper_atomic_cmpxchgw_le,
+    [MO_16 | MO_BE] = helper_atomic_cmpxchgw_be,
+    [MO_32 | MO_LE] = helper_atomic_cmpxchgl_le,
+    [MO_32 | MO_BE] = helper_atomic_cmpxchgl_be,
+    [MO_64 | MO_LE] = helper_atomic_cmpxchgq_le,
+    [MO_64 | MO_BE] = helper_atomic_cmpxchgq_be,
+};
+
+static void * const qemu_atomic_xchg_helpers[(MO_SIZE | MO_BSWAP) + 1]
+    __attribute__((unused)) = {
+    [MO_8] = helper_atomic_xchgb,
+    [MO_16 | MO_LE] = helper_atomic_xchgw_le,
+    [MO_16 | MO_BE] = helper_atomic_xchgw_be,
+    [MO_32 | MO_LE] = helper_atomic_xchgl_le,
+    [MO_32 | MO_BE] = helper_atomic_xchgl_be,
+    [MO_64 | MO_LE] = helper_atomic_xchgq_le,
+    [MO_64 | MO_BE] = helper_atomic_xchgq_be,
+};
+
+static void * const qemu_atomic_fetch_add_helpers[(MO_SIZE | MO_BSWAP) + 1]
+    __attribute__((unused)) = {
+    [MO_8] = helper_atomic_fetch_addb,
+    [MO_16 | MO_LE] = helper_atomic_fetch_addw_le,
+    [MO_16 | MO_BE] = helper_atomic_fetch_addw_be,
+    [MO_32 | MO_LE] = helper_atomic_fetch_addl_le,
+    [MO_32 | MO_BE] = helper_atomic_fetch_addl_be,
+    [MO_64 | MO_LE] = helper_atomic_fetch_addq_le,
+    [MO_64 | MO_BE] = helper_atomic_fetch_addq_be,
+};
+
+static void * const qemu_atomic_fetch_and_helpers[(MO_SIZE | MO_BSWAP) + 1]
+    __attribute__((unused)) = {
+    [MO_8] = helper_atomic_fetch_andb,
+    [MO_16 | MO_LE] = helper_atomic_fetch_andw_le,
+    [MO_16 | MO_BE] = helper_atomic_fetch_andw_be,
+    [MO_32 | MO_LE] = helper_atomic_fetch_andl_le,
+    [MO_32 | MO_BE] = helper_atomic_fetch_andl_be,
+    [MO_64 | MO_LE] = helper_atomic_fetch_andq_le,
+    [MO_64 | MO_BE] = helper_atomic_fetch_andq_be,
+};
+
+static void * const qemu_atomic_fetch_or_helpers[(MO_SIZE | MO_BSWAP) + 1]
+    __attribute__((unused)) = {
+    [MO_8] = helper_atomic_fetch_orb,
+    [MO_16 | MO_LE] = helper_atomic_fetch_orw_le,
+    [MO_16 | MO_BE] = helper_atomic_fetch_orw_be,
+    [MO_32 | MO_LE] = helper_atomic_fetch_orl_le,
+    [MO_32 | MO_BE] = helper_atomic_fetch_orl_be,
+    [MO_64 | MO_LE] = helper_atomic_fetch_orq_le,
+    [MO_64 | MO_BE] = helper_atomic_fetch_orq_be,
+};
+
+static void * const qemu_atomic_fetch_xor_helpers[(MO_SIZE | MO_BSWAP) + 1]
+    __attribute__((unused)) = {
+    [MO_8] = helper_atomic_fetch_xorb,
+    [MO_16 | MO_LE] = helper_atomic_fetch_xorw_le,
+    [MO_16 | MO_BE] = helper_atomic_fetch_xorw_be,
+    [MO_32 | MO_LE] = helper_atomic_fetch_xorl_le,
+    [MO_32 | MO_BE] = helper_atomic_fetch_xorl_be,
+    [MO_64 | MO_LE] = helper_atomic_fetch_xorq_le,
+    [MO_64 | MO_BE] = helper_atomic_fetch_xorq_be,
+};
+
 typedef struct {
     MemOp atom;   /* lg2 bits of atomicity required */
     MemOp align;  /* lg2 bits of alignment to use */
@@ -1078,6 +1144,18 @@ typedef struct TCGOutOpQemuLdSt2 {
                 TCGReg addr, MemOpIdx oi);
 } TCGOutOpQemuLdSt2;
 
+typedef struct TCGOutOpQemuAtomic {
+    TCGOutOp base;
+    void (*out)(TCGContext *s, TCGType type, TCGReg ret,
+                TCGReg val, TCGReg addr, MemOpIdx oi);
+} TCGOutOpQemuAtomic;
+
+typedef struct TCGOutOpQemuAtomicCmpxchg {
+    TCGOutOp base;
+    void (*out)(TCGContext *s, TCGType type, TCGReg ret,
+                TCGReg cmp, TCGReg newv, TCGReg addr, MemOpIdx oi);
+} TCGOutOpQemuAtomicCmpxchg;
+
 typedef struct TCGOutOpQemuStRelImm {
     TCGOutOp base;
     void (*out)(TCGContext *s, TCGType type, TCGReg data,
@@ -1135,6 +1213,32 @@ static const TCGOutOpQemuLdAcqImm outop_qemu_ld_acq_imm = {
 #endif
 #if !TCG_TARGET_HAS_st_rel_imm
 static const TCGOutOpQemuStRelImm outop_qemu_st_rel_imm = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
+#endif
+#if !TCG_TARGET_HAS_qemu_atomic
+static const TCGOutOpQemuAtomicCmpxchg outop_qemu_atomic_cmpxchg = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
+static const TCGOutOpQemuAtomic outop_qemu_atomic_xchg = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_add = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_and = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_or = {
+    .base.static_constraint = C_NotImplemented,
+    .out = NULL,
+};
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_xor = {
     .base.static_constraint = C_NotImplemented,
     .out = NULL,
 };
@@ -1248,6 +1352,18 @@ static const TCGOutOp * const all_outop[NB_OPS] = {
     OUTOP(INDEX_op_qemu_st_rel, TCGOutOpQemuLdSt, outop_qemu_st_rel),
     OUTOP(INDEX_op_qemu_st_rel_imm, TCGOutOpQemuStRelImm, outop_qemu_st_rel_imm),
     OUTOP(INDEX_op_qemu_st2, TCGOutOpQemuLdSt2, outop_qemu_st2),
+    OUTOP(INDEX_op_qemu_atomic_cmpxchg, TCGOutOpQemuAtomicCmpxchg,
+          outop_qemu_atomic_cmpxchg),
+    OUTOP(INDEX_op_qemu_atomic_xchg, TCGOutOpQemuAtomic,
+          outop_qemu_atomic_xchg),
+    OUTOP(INDEX_op_qemu_atomic_fetch_add, TCGOutOpQemuAtomic,
+          outop_qemu_atomic_fetch_add),
+    OUTOP(INDEX_op_qemu_atomic_fetch_and, TCGOutOpQemuAtomic,
+          outop_qemu_atomic_fetch_and),
+    OUTOP(INDEX_op_qemu_atomic_fetch_or, TCGOutOpQemuAtomic,
+          outop_qemu_atomic_fetch_or),
+    OUTOP(INDEX_op_qemu_atomic_fetch_xor, TCGOutOpQemuAtomic,
+          outop_qemu_atomic_fetch_xor),
     OUTOP(INDEX_op_rems, TCGOutOpBinary, outop_rems),
     OUTOP(INDEX_op_remu, TCGOutOpBinary, outop_remu),
     OUTOP(INDEX_op_rotl, TCGOutOpBinary, outop_rotl),
@@ -2416,6 +2532,14 @@ bool tcg_op_supported(TCGOpcode op, TCGType type, unsigned flags)
     case INDEX_op_qemu_st2:
         tcg_debug_assert(type == TCG_TYPE_I128);
         goto do_lookup;
+    case INDEX_op_qemu_atomic_cmpxchg:
+    case INDEX_op_qemu_atomic_xchg:
+    case INDEX_op_qemu_atomic_fetch_add:
+    case INDEX_op_qemu_atomic_fetch_and:
+    case INDEX_op_qemu_atomic_fetch_or:
+    case INDEX_op_qemu_atomic_fetch_xor:
+        tcg_debug_assert(type <= TCG_TYPE_REG);
+        return TCG_TARGET_HAS_qemu_atomic;
 
     case INDEX_op_add:
     case INDEX_op_and:
@@ -2981,6 +3105,12 @@ void tcg_dump_ops(TCGContext *s, FILE *f, bool have_prefs)
             case INDEX_op_qemu_st:
             case INDEX_op_qemu_ld2:
             case INDEX_op_qemu_st2:
+            case INDEX_op_qemu_atomic_cmpxchg:
+            case INDEX_op_qemu_atomic_xchg:
+            case INDEX_op_qemu_atomic_fetch_add:
+            case INDEX_op_qemu_atomic_fetch_and:
+            case INDEX_op_qemu_atomic_fetch_or:
+            case INDEX_op_qemu_atomic_fetch_xor:
                 {
                     const char *s_al, *s_tlb, *s_op, *s_at;
                     MemOpIdx oi = op->args[k++];
@@ -5851,6 +5981,31 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
 
             out->out(s, type, new_args[0], new_args[1],
                      new_args[2], new_args[3]);
+        }
+        break;
+
+    case INDEX_op_qemu_atomic_cmpxchg:
+        {
+            const TCGOutOpQemuAtomicCmpxchg *out =
+                container_of(all_outop[op->opc],
+                             TCGOutOpQemuAtomicCmpxchg, base);
+
+            out->out(s, type, new_args[0], new_args[1], new_args[2],
+                     new_args[3], new_args[4]);
+        }
+        break;
+
+    case INDEX_op_qemu_atomic_xchg:
+    case INDEX_op_qemu_atomic_fetch_add:
+    case INDEX_op_qemu_atomic_fetch_and:
+    case INDEX_op_qemu_atomic_fetch_or:
+    case INDEX_op_qemu_atomic_fetch_xor:
+        {
+            const TCGOutOpQemuAtomic *out =
+                container_of(all_outop[op->opc], TCGOutOpQemuAtomic, base);
+
+            out->out(s, type, new_args[0], new_args[1], new_args[2],
+                     new_args[3]);
         }
         break;
 
