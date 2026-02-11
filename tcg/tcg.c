@@ -5546,16 +5546,14 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
         if (op->opc == INDEX_op_set_label ||
             (def->flags & (TCG_OPF_COND_BRANCH | TCG_OPF_BB_END))) {
             clear_hoist = true;
-        } else if (op->opc == INDEX_op_mov &&
-                   nb_oargs == 1 && nb_iargs == 1 &&
-                   !const_args[0] && !const_args[1] &&
-                   new_args[1] == old_hoist) {
+        } else if (op->opc != INDEX_op_qemu_ld_acq &&
+                   op->opc != INDEX_op_qemu_st_rel) {
             /*
-             * Preserve and retarget the cached check across a plain move:
-             * if dst := src and src was the checked address register, the
-             * same checked value now resides in dst.
+             * Reuse is only valid across immediately adjacent non-imm acq/rel
+             * qemu memory ops. Any other operation may change the address
+             * value associated with the cached check.
              */
-            s->acqrel_align_hoist_addr = new_args[0];
+            clear_hoist = true;
         } else {
             for (i = 0; i < nb_oargs; i++) {
                 if (!const_args[i] &&
