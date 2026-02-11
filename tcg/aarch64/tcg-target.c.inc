@@ -2281,6 +2281,7 @@ static const TCGOutOpQemuLdSt outop_qemu_ld_acq = {
     .out = tgen_qemu_ld_acq,
 };
 
+#if TCG_TARGET_HAS_ld_acq_imm
 static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
                                  TCGReg data_reg, TCGReg addr_reg,
                                  MemOpIdx oi, int32_t disp)
@@ -2465,6 +2466,7 @@ static const TCGOutOpQemuLdAcqImm outop_qemu_ld_acq_imm = {
     .base.static_constraint = C_O1_I1(r, r),
     .out = tgen_qemu_ld_acq_imm,
 };
+#endif
 
 static void tgen_qemu_st(TCGContext *s, TCGType data_type, TCGReg data_reg,
                          TCGReg addr_reg, MemOpIdx oi)
@@ -2597,6 +2599,7 @@ static const TCGOutOpQemuLdSt outop_qemu_st_rel = {
     .out = tgen_qemu_st_rel,
 };
 
+#if TCG_TARGET_HAS_st_rel_imm
 static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
                                  TCGReg data_reg, TCGReg addr_reg,
                                  MemOpIdx oi, int32_t disp)
@@ -2743,6 +2746,7 @@ static const TCGOutOpQemuStRelImm outop_qemu_st_rel_imm = {
     .base.static_constraint = C_O0_I2(rz, r),
     .out = tgen_qemu_st_rel_imm,
 };
+#endif
 
 static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
                                    TCGReg addr_reg, MemOpIdx oi, bool is_ld)
