@@ -364,6 +364,8 @@ struct TCGContext {
     TCGOp *pending_st_rel_imm_anchor;
     bool acqrel_align_hoist_valid;
     bool acqrel_align_hoist_is_ld;
+    bool acqrel_align_hoist_arg_valid;
+    TCGArg acqrel_align_hoist_arg;
     TCGReg acqrel_align_hoist_addr;
     unsigned acqrel_align_hoist_size_lg;
     MemOpIdx acqrel_align_hoist_oi;

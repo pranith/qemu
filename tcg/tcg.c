@@ -5554,6 +5554,15 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
              * value associated with the cached check.
              */
             clear_hoist = true;
+        } else if (const_args[1] ||
+                   !s->acqrel_align_hoist_arg_valid ||
+                   op->args[1] != s->acqrel_align_hoist_arg) {
+            /*
+             * Host register identity alone is insufficient: the allocator may
+             * reuse the same host register for different TCG address values.
+             * Reuse only if the exact same TCG address argument is seen again.
+             */
+            clear_hoist = true;
         } else {
             for (i = 0; i < nb_oargs; i++) {
                 if (!const_args[i] &&
@@ -5566,6 +5575,16 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
 
         if (clear_hoist) {
             s->acqrel_align_hoist_valid = false;
+            s->acqrel_align_hoist_arg_valid = false;
+        }
+    }
+
+    if (op->opc == INDEX_op_qemu_ld_acq || op->opc == INDEX_op_qemu_st_rel) {
+        if (!const_args[1]) {
+            s->acqrel_align_hoist_arg_valid = true;
+            s->acqrel_align_hoist_arg = op->args[1];
+        } else {
+            s->acqrel_align_hoist_arg_valid = false;
         }
     }
 
