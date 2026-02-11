@@ -21,6 +21,9 @@
 #ifndef TCG_TARGET_HAS_st_rel_imm
 #define TCG_TARGET_HAS_st_rel_imm 0
 #endif
+#ifndef TCG_TARGET_HAS_qemu_atomic
+#define TCG_TARGET_HAS_qemu_atomic 0
+#endif
 
 #if TCG_TARGET_REG_BITS == 32
 /* Turn some undef macros into false macros.  */
