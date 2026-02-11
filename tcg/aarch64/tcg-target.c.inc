@@ -1694,6 +1694,26 @@ bool tcg_target_has_memory_bswap(MemOp memop)
     return false;
 }
 
+static bool reloc_pc_ldst(tcg_insn_unit *src_rw, const tcg_insn_unit *target)
+{
+    uint32_t insn = *src_rw;
+
+    /*
+     * qemu_ld/st slow-path patch points may be:
+     * - B (imm26) from local 16-bit guard stubs,
+     * - CB{N}Z/B.cond (imm19),
+     * - TB{N}Z (imm14) from short local branches.
+     */
+    if ((insn & 0xfc000000) == I3206_B) {
+        return reloc_pc26(src_rw, target);
+    }
+    if ((insn & 0x7e000000) == I3205_TBZ ||
+        (insn & 0x7e000000) == I3205_TBNZ) {
+        return reloc_pc14(src_rw, target);
+    }
+    return reloc_pc19(src_rw, target);
+}
+
 static const TCGLdstHelperParam ldst_helper_param = {
     .ntmp = 1, .tmp = { TCG_REG_TMP0 }
 };
@@ -1765,8 +1785,8 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
     }
 
     const tcg_insn_unit *tgt = tcg_splitwx_to_rx(s->code_ptr);
-    if (!reloc_pc19(lb->label_ptr[0], tgt) ||
-        (lb->label_ptr[1] && !reloc_pc19(lb->label_ptr[1], tgt))) {
+    if (!reloc_pc_ldst(lb->label_ptr[0], tgt) ||
+        (lb->label_ptr[1] && !reloc_pc_ldst(lb->label_ptr[1], tgt))) {
         return false;
     }
 
@@ -1851,8 +1871,8 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
     }
 
     const tcg_insn_unit *tgt = tcg_splitwx_to_rx(s->code_ptr);
-    if (!reloc_pc19(lb->label_ptr[0], tgt) ||
-        (lb->label_ptr[1] && !reloc_pc19(lb->label_ptr[1], tgt))) {
+    if (!reloc_pc_ldst(lb->label_ptr[0], tgt) ||
+        (lb->label_ptr[1] && !reloc_pc_ldst(lb->label_ptr[1], tgt))) {
         return false;
     }
 
@@ -2290,12 +2310,26 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
              * w_align = base & align_mask; non-zero means misaligned.
              * Use AND (not ANDS) so we do not clobber NZCV between guest ops.
              */
-            tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
             tcg_debug_assert(misalign_ptr != NULL);
             tcg_debug_assert(*misalign_ptr == NULL);
-            *misalign_ptr = s->code_ptr;
-            tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
-            if (align_reg == TCG_REG_ACQREL_ALIGN) {
+            if (size_lg == MO_16) {
+                /*
+                 * Keep the fast aligned path to one instruction:
+                 *   tbz base,#0,fast
+                 *   b   slow_path
+                 * Use B for slow_path so range is not limited to imm14.
+                 */
+                tcg_out_insn(s, 3205, TBZ, base, 0, 2);
+                *misalign_ptr = s->code_ptr;
+                tcg_out_insn(s, 3206, B, 0);
+                s->acqrel_align_hoist_valid = false;
+            } else {
+                tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base,
+                                 align_mask);
+                *misalign_ptr = s->code_ptr;
+                tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+            }
+            if (size_lg != MO_16 && align_reg == TCG_REG_ACQREL_ALIGN) {
                 s->acqrel_align_hoist_valid = true;
                 s->acqrel_align_hoist_is_ld = true;
                 s->acqrel_align_hoist_addr = addr_reg;
@@ -2466,10 +2500,16 @@ static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
         if (eff_addr == TCG_REG_ACQREL_ALIGN) {
             align_reg = TCG_REG_TMP1;
         }
-        tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
         tcg_debug_assert(*misalign_ptr == NULL);
-        *misalign_ptr = s->code_ptr;
-        tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+        if (size_lg == MO_16) {
+            tcg_out_insn(s, 3205, TBZ, base, 0, 2);
+            *misalign_ptr = s->code_ptr;
+            tcg_out_insn(s, 3206, B, 0);
+        } else {
+            tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
+            *misalign_ptr = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+        }
         s->acqrel_align_hoist_valid = false;
     }
 
@@ -2639,12 +2679,20 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
              * w_align = base & align_mask; non-zero means misaligned.
              * Use AND (not ANDS) so we do not clobber NZCV between guest ops.
              */
-            tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
             tcg_debug_assert(misalign_ptr != NULL);
             tcg_debug_assert(*misalign_ptr == NULL);
-            *misalign_ptr = s->code_ptr;
-            tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
-            if (align_reg == TCG_REG_ACQREL_ALIGN) {
+            if (size_lg == MO_16) {
+                tcg_out_insn(s, 3205, TBZ, base, 0, 2);
+                *misalign_ptr = s->code_ptr;
+                tcg_out_insn(s, 3206, B, 0);
+                s->acqrel_align_hoist_valid = false;
+            } else {
+                tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base,
+                                 align_mask);
+                *misalign_ptr = s->code_ptr;
+                tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+            }
+            if (size_lg != MO_16 && align_reg == TCG_REG_ACQREL_ALIGN) {
                 s->acqrel_align_hoist_valid = true;
                 s->acqrel_align_hoist_is_ld = false;
                 s->acqrel_align_hoist_addr = addr_reg;
@@ -2777,10 +2825,16 @@ static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
         if (eff_addr == TCG_REG_ACQREL_ALIGN) {
             align_reg = TCG_REG_TMP1;
         }
-        tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
         tcg_debug_assert(*misalign_ptr == NULL);
-        *misalign_ptr = s->code_ptr;
-        tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+        if (size_lg == MO_16) {
+            tcg_out_insn(s, 3205, TBZ, base, 0, 2);
+            *misalign_ptr = s->code_ptr;
+            tcg_out_insn(s, 3206, B, 0);
+        } else {
+            tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
+            *misalign_ptr = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+        }
         s->acqrel_align_hoist_valid = false;
     }
 
