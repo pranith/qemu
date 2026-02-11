@@ -434,6 +434,30 @@ typedef enum {
     I3306_CASPA     = 0x48607c00,
     I3306_CASPL     = 0x4820fc00,
     I3306_CASPAL    = 0x4860fc00,
+    I3306_SWPALB    = 0x38e08000,
+    I3306_SWPALH    = 0x78e08000,
+    I3306_SWPALW    = 0xb8e08000,
+    I3306_SWPALX    = 0xf8e08000,
+    I3306_CASALB    = 0x08e0fc00,
+    I3306_CASALH    = 0x48e0fc00,
+    I3306_CASALW    = 0x88e0fc00,
+    I3306_CASALX    = 0xc8e0fc00,
+    I3306_LDADDALB  = 0x38e00000,
+    I3306_LDADDALH  = 0x78e00000,
+    I3306_LDADDALW  = 0xb8e00000,
+    I3306_LDADDALX  = 0xf8e00000,
+    I3306_LDCLRALB  = 0x38e01000,
+    I3306_LDCLRALH  = 0x78e01000,
+    I3306_LDCLRALW  = 0xb8e01000,
+    I3306_LDCLRALX  = 0xf8e01000,
+    I3306_LDEORALB  = 0x38e02000,
+    I3306_LDEORALH  = 0x78e02000,
+    I3306_LDEORALW  = 0xb8e02000,
+    I3306_LDEORALX  = 0xf8e02000,
+    I3306_LDSETALB  = 0x38e03000,
+    I3306_LDSETALH  = 0x78e03000,
+    I3306_LDSETALW  = 0xb8e03000,
+    I3306_LDSETALX  = 0xf8e03000,
 
     /* Load-acquire, store-release instructions */
     I3306_STLRB     = 0x089ffc00,
@@ -711,6 +735,17 @@ static void tcg_out_insn_3306(TCGContext *s, AArch64Insn insn, TCGReg rs,
                               TCGReg rt, TCGReg rt2, TCGReg rn)
 {
     tcg_out32(s, insn | rs << 16 | rt2 << 10 | rn << 5 | rt);
+}
+
+/*
+ * Atomic memory ops (single-register form).
+ * For RMW ops (SWP/LDADD/LDCLR/LDSET/LDEOR): rs is input, rt receives old.
+ * For CAS: rs carries expected and is overwritten with old, rt is desired new.
+ */
+static void tcg_out_insn_3306_rmw(TCGContext *s, AArch64Insn insn,
+                                  TCGReg rs, TCGReg rt, TCGReg rn)
+{
+    tcg_out32(s, insn | rs << 16 | rn << 5 | rt);
 }
 
 /*
@@ -2796,6 +2831,497 @@ static const TCGOutOpQemuStRelImm outop_qemu_st_rel_imm = {
     .out = tgen_qemu_st_rel_imm,
 };
 #endif
+
+typedef enum AArch64QemuAtomicKind {
+    AA64_ATOMIC_CMPXCHG,
+    AA64_ATOMIC_XCHG,
+    AA64_ATOMIC_FETCH_ADD,
+    AA64_ATOMIC_FETCH_AND,
+    AA64_ATOMIC_FETCH_OR,
+    AA64_ATOMIC_FETCH_XOR,
+} AArch64QemuAtomicKind;
+
+static const void *aarch64_qemu_atomic_helper(AArch64QemuAtomicKind kind,
+                                              MemOp memop)
+{
+    unsigned idx = memop & (MO_SIZE | MO_BSWAP);
+
+    switch (kind) {
+    case AA64_ATOMIC_CMPXCHG:
+        return qemu_atomic_cmpxchg_helpers[idx];
+    case AA64_ATOMIC_XCHG:
+        return qemu_atomic_xchg_helpers[idx];
+    case AA64_ATOMIC_FETCH_ADD:
+        return qemu_atomic_fetch_add_helpers[idx];
+    case AA64_ATOMIC_FETCH_AND:
+        return qemu_atomic_fetch_and_helpers[idx];
+    case AA64_ATOMIC_FETCH_OR:
+        return qemu_atomic_fetch_or_helpers[idx];
+    case AA64_ATOMIC_FETCH_XOR:
+        return qemu_atomic_fetch_xor_helpers[idx];
+    default:
+        g_assert_not_reached();
+    }
+}
+
+static AArch64Insn aarch64_qemu_atomic_insn(AArch64QemuAtomicKind kind,
+                                            MemOp size_lg)
+{
+    switch (kind) {
+    case AA64_ATOMIC_CMPXCHG:
+        switch (size_lg) {
+        case MO_8:  return I3306_CASALB;
+        case MO_16: return I3306_CASALH;
+        case MO_32: return I3306_CASALW;
+        case MO_64: return I3306_CASALX;
+        default:    return 0;
+        }
+    case AA64_ATOMIC_XCHG:
+        switch (size_lg) {
+        case MO_8:  return I3306_SWPALB;
+        case MO_16: return I3306_SWPALH;
+        case MO_32: return I3306_SWPALW;
+        case MO_64: return I3306_SWPALX;
+        default:    return 0;
+        }
+    case AA64_ATOMIC_FETCH_ADD:
+        switch (size_lg) {
+        case MO_8:  return I3306_LDADDALB;
+        case MO_16: return I3306_LDADDALH;
+        case MO_32: return I3306_LDADDALW;
+        case MO_64: return I3306_LDADDALX;
+        default:    return 0;
+        }
+    case AA64_ATOMIC_FETCH_AND:
+        switch (size_lg) {
+        case MO_8:  return I3306_LDCLRALB;
+        case MO_16: return I3306_LDCLRALH;
+        case MO_32: return I3306_LDCLRALW;
+        case MO_64: return I3306_LDCLRALX;
+        default:    return 0;
+        }
+    case AA64_ATOMIC_FETCH_OR:
+        switch (size_lg) {
+        case MO_8:  return I3306_LDSETALB;
+        case MO_16: return I3306_LDSETALH;
+        case MO_32: return I3306_LDSETALW;
+        case MO_64: return I3306_LDSETALX;
+        default:    return 0;
+        }
+    case AA64_ATOMIC_FETCH_XOR:
+        switch (size_lg) {
+        case MO_8:  return I3306_LDEORALB;
+        case MO_16: return I3306_LDEORALH;
+        case MO_32: return I3306_LDEORALW;
+        case MO_64: return I3306_LDEORALX;
+        default:    return 0;
+        }
+    default:
+        g_assert_not_reached();
+    }
+}
+
+/*
+ * Materialize the fast host address and emit a branch to a local slow path.
+ * Returns the branch instruction to patch, or NULL if no branch is needed.
+ */
+static tcg_insn_unit *prepare_host_addr_inline(TCGContext *s, HostAddress *h,
+                                               TCGReg addr_reg, MemOpIdx oi,
+                                               bool is_ld)
+{
+    TCGType addr_type = s->addr_type;
+    MemOp opc = get_memop(oi);
+    MemOp s_bits = opc & MO_SIZE;
+    unsigned a_mask;
+    tcg_insn_unit *slow_ptr = NULL;
+
+    h->aa = atom_and_align_for_opc(s, opc,
+                                   have_lse2 ? MO_ATOM_WITHIN16
+                                             : MO_ATOM_IFALIGN,
+                                   s_bits == MO_128);
+    a_mask = (1 << h->aa.align) - 1;
+
+    if (tcg_use_softmmu) {
+        unsigned s_mask = (1u << s_bits) - 1;
+        unsigned mem_index = get_mmuidx(oi);
+        TCGReg addr_adj;
+        uint64_t compare_mask;
+
+        /* Load CPUTLBDescFast.{mask,table} into {tmp0,tmp1}. */
+        QEMU_BUILD_BUG_ON(offsetof(CPUTLBDescFast, mask) != 0);
+        QEMU_BUILD_BUG_ON(offsetof(CPUTLBDescFast, table) != 8);
+        tcg_out_insn(s, 3314, LDP, TCG_REG_TMP0, TCG_REG_TMP1, TCG_AREG0,
+                     tlb_mask_table_ofs(s, mem_index), 1, 0);
+
+        /* Extract the TLB index from the address into X0.  */
+        tcg_out_insn(s, 3502S, AND_LSR, TCG_TYPE_I64,
+                     TCG_REG_TMP0, TCG_REG_TMP0, addr_reg,
+                     TARGET_PAGE_BITS - CPU_TLB_ENTRY_BITS);
+
+        /* Add the tlb_table pointer, forming the CPUTLBEntry address. */
+        tcg_out_insn(s, 3502, ADD, 1, TCG_REG_TMP1, TCG_REG_TMP1, TCG_REG_TMP0);
+
+        /* Load the tlb comparator into TMP0, and the fast path addend. */
+        QEMU_BUILD_BUG_ON(HOST_BIG_ENDIAN);
+        tcg_out_ld(s, addr_type, TCG_REG_TMP0, TCG_REG_TMP1,
+                   is_ld ? offsetof(CPUTLBEntry, addr_read)
+                         : offsetof(CPUTLBEntry, addr_write));
+        tcg_out_ld(s, TCG_TYPE_PTR, TCG_REG_TMP1, TCG_REG_TMP1,
+                   offsetof(CPUTLBEntry, addend));
+
+        /*
+         * For aligned accesses, we check the first byte and include
+         * the alignment bits within the address. For unaligned access,
+         * we check that we don't cross pages using the address of the
+         * last byte of the access.
+         */
+        if (a_mask >= s_mask) {
+            addr_adj = addr_reg;
+        } else {
+            addr_adj = TCG_REG_TMP2;
+            tcg_out_insn(s, 3401, ADDI, addr_type,
+                         addr_adj, addr_reg, s_mask - a_mask);
+        }
+        compare_mask = (uint64_t)TARGET_PAGE_MASK | a_mask;
+
+        /* Store the page mask part of the address into TMP2. */
+        tcg_out_logicali(s, I3404_ANDI, addr_type, TCG_REG_TMP2,
+                         addr_adj, compare_mask);
+
+        /* Perform the address comparison. */
+        tcg_out_cmp(s, addr_type, TCG_COND_NE, TCG_REG_TMP0, TCG_REG_TMP2, 0);
+
+        /* If not equal, branch to local slow path. */
+        slow_ptr = s->code_ptr;
+        tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
+
+        h->base = TCG_REG_TMP1;
+        h->index = addr_reg;
+        h->index_ext = addr_type;
+    } else {
+        if (a_mask) {
+            /* tst addr, #mask */
+            tcg_out_logicali(s, I3404_ANDSI, 0, TCG_REG_XZR, addr_reg, a_mask);
+
+            /* b.ne slow_path */
+            slow_ptr = s->code_ptr;
+            tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
+        }
+
+        if (guest_base || addr_type == TCG_TYPE_I32) {
+            h->base = TCG_REG_GUEST_BASE;
+            h->index = addr_reg;
+            h->index_ext = addr_type;
+        } else {
+            h->base = addr_reg;
+            h->index = TCG_REG_XZR;
+            h->index_ext = TCG_TYPE_I64;
+        }
+    }
+
+    return slow_ptr;
+}
+
+static inline void tcg_out_qemu_atomic_move_addr_arg(TCGContext *s,
+                                                     TCGReg arg_reg,
+                                                     TCGReg addr_reg)
+{
+    if (s->addr_type == TCG_TYPE_I32) {
+        tcg_out_extu_i32_i64(s, arg_reg, addr_reg);
+    } else if (arg_reg != addr_reg) {
+        tcg_out_mov(s, TCG_TYPE_I64, arg_reg, addr_reg);
+    }
+}
+
+static void tcg_out_qemu_atomic_helper_call(TCGContext *s, TCGType data_type,
+                                            TCGReg ret_reg, TCGReg val_reg,
+                                            TCGReg addr_reg, MemOpIdx oi,
+                                            AArch64QemuAtomicKind kind)
+{
+    TCGReg addr_arg = TCG_REG_TMP0;
+    TCGReg val_arg = TCG_REG_TMP1;
+    const tcg_insn_unit *helper = aarch64_qemu_atomic_helper(kind, get_memop(oi));
+
+    tcg_debug_assert(helper != NULL);
+    tcg_out_qemu_atomic_move_addr_arg(s, addr_arg, addr_reg);
+    if (val_reg != val_arg) {
+        tcg_out_mov(s, data_type, val_arg, val_reg);
+    }
+    if (TCG_AREG0 != TCG_REG_X0) {
+        tcg_out_mov(s, TCG_TYPE_I64, TCG_REG_X0, TCG_AREG0);
+    }
+    if (addr_arg != TCG_REG_X1) {
+        tcg_out_mov(s, TCG_TYPE_I64, TCG_REG_X1, addr_arg);
+    }
+    if (val_arg != TCG_REG_X2) {
+        tcg_out_mov(s, data_type, TCG_REG_X2, val_arg);
+    }
+    tcg_out_movi(s, TCG_TYPE_I32, TCG_REG_X3, oi);
+    tcg_out_call_int(s, helper);
+    if (ret_reg != TCG_REG_X0) {
+        tcg_out_mov(s, data_type, ret_reg, TCG_REG_X0);
+    }
+}
+
+static void tcg_out_qemu_atomic_cmpxchg_helper_call(TCGContext *s,
+                                                    TCGType data_type,
+                                                    TCGReg ret_reg,
+                                                    TCGReg cmp_reg,
+                                                    TCGReg new_reg,
+                                                    TCGReg addr_reg,
+                                                    MemOpIdx oi)
+{
+    TCGReg addr_arg = TCG_REG_TMP0;
+    TCGReg cmp_arg = TCG_REG_TMP1;
+    TCGReg new_arg = TCG_REG_TMP2;
+    const tcg_insn_unit *helper =
+        aarch64_qemu_atomic_helper(AA64_ATOMIC_CMPXCHG, get_memop(oi));
+
+    tcg_debug_assert(helper != NULL);
+    tcg_out_qemu_atomic_move_addr_arg(s, addr_arg, addr_reg);
+    if (cmp_reg != cmp_arg) {
+        tcg_out_mov(s, data_type, cmp_arg, cmp_reg);
+    }
+    if (new_reg != new_arg) {
+        tcg_out_mov(s, data_type, new_arg, new_reg);
+    }
+    if (TCG_AREG0 != TCG_REG_X0) {
+        tcg_out_mov(s, TCG_TYPE_I64, TCG_REG_X0, TCG_AREG0);
+    }
+    if (addr_arg != TCG_REG_X1) {
+        tcg_out_mov(s, TCG_TYPE_I64, TCG_REG_X1, addr_arg);
+    }
+    if (cmp_arg != TCG_REG_X2) {
+        tcg_out_mov(s, data_type, TCG_REG_X2, cmp_arg);
+    }
+    if (new_arg != TCG_REG_X3) {
+        tcg_out_mov(s, data_type, TCG_REG_X3, new_arg);
+    }
+    tcg_out_movi(s, TCG_TYPE_I32, TCG_REG_X4, oi);
+    tcg_out_call_int(s, helper);
+    if (ret_reg != TCG_REG_X0) {
+        tcg_out_mov(s, data_type, ret_reg, TCG_REG_X0);
+    }
+}
+
+static void tgen_qemu_atomic_common(TCGContext *s, TCGType data_type,
+                                    TCGReg ret_reg, TCGReg val_reg,
+                                    TCGReg addr_reg, MemOpIdx oi,
+                                    AArch64QemuAtomicKind kind)
+{
+    MemOp memop = get_memop(oi);
+    MemOp size_lg = memop & MO_SIZE;
+    AArch64Insn insn;
+    HostAddress h;
+    TCGReg base;
+    TCGReg rmw_val_reg = val_reg;
+    tcg_insn_unit *slow_tlb, *slow_align = NULL, *done = NULL;
+
+    if (!have_lse || (memop & MO_BSWAP)) {
+        goto helper;
+    }
+
+    insn = aarch64_qemu_atomic_insn(kind, size_lg);
+    if (insn == 0) {
+        goto helper;
+    }
+
+    slow_tlb = prepare_host_addr_inline(s, &h, addr_reg, oi, false);
+    base = tcg_out_qemu_ldst_base(s, &h);
+
+    if (size_lg) {
+        uint64_t align_mask = (1u << size_lg) - 1;
+        tcg_out_logicali(s, I3404_ANDI, 0, TCG_REG_TMP0, base, align_mask);
+        slow_align = s->code_ptr;
+        tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP0, 0);
+    }
+
+    if (ret_reg == val_reg) {
+        tcg_out_mov(s, data_type, TCG_REG_TMP0, val_reg);
+        rmw_val_reg = TCG_REG_TMP0;
+    }
+    if (kind == AA64_ATOMIC_FETCH_AND) {
+        /*
+         * LDCLR computes mem = old & ~Rs.
+         * qemu_atomic_fetch_and expects mem = old & Rs.
+         */
+        if (rmw_val_reg == base) {
+            tcg_out_mov(s, data_type, TCG_REG_TMP0, rmw_val_reg);
+            rmw_val_reg = TCG_REG_TMP0;
+        }
+        tcg_out_insn(s, 3510, ORN, data_type,
+                     rmw_val_reg, TCG_REG_XZR, rmw_val_reg);
+    }
+    tcg_out_insn_3306_rmw(s, insn, rmw_val_reg, ret_reg, base);
+
+    if (slow_tlb || slow_align) {
+        const tcg_insn_unit *slow_tgt;
+        const tcg_insn_unit *done_tgt;
+
+        done = s->code_ptr;
+        tcg_out_insn(s, 3206, B, 0);
+
+        slow_tgt = tcg_splitwx_to_rx(s->code_ptr);
+        if (slow_tlb) {
+            tcg_debug_assert(reloc_pc_ldst(slow_tlb, slow_tgt));
+        }
+        if (slow_align) {
+            tcg_debug_assert(reloc_pc_ldst(slow_align, slow_tgt));
+        }
+        tcg_out_qemu_atomic_helper_call(s, data_type, ret_reg, val_reg,
+                                        addr_reg, oi, kind);
+
+        done_tgt = tcg_splitwx_to_rx(s->code_ptr);
+        tcg_debug_assert(reloc_pc_ldst(done, done_tgt));
+    }
+    return;
+
+helper:
+    tcg_out_qemu_atomic_helper_call(s, data_type, ret_reg, val_reg,
+                                    addr_reg, oi, kind);
+}
+
+static void tgen_qemu_atomic_cmpxchg(TCGContext *s, TCGType data_type,
+                                     TCGReg ret_reg, TCGReg cmp_reg,
+                                     TCGReg new_reg, TCGReg addr_reg,
+                                     MemOpIdx oi)
+{
+    MemOp memop = get_memop(oi);
+    MemOp size_lg = memop & MO_SIZE;
+    HostAddress h;
+    TCGReg base;
+    TCGReg casal_new_reg = new_reg;
+    tcg_insn_unit *slow_tlb, *slow_align = NULL, *done = NULL;
+
+    if (!have_lse || (memop & MO_BSWAP)) {
+        goto helper;
+    }
+    if (aarch64_qemu_atomic_insn(AA64_ATOMIC_CMPXCHG, size_lg) == 0) {
+        goto helper;
+    }
+
+    slow_tlb = prepare_host_addr_inline(s, &h, addr_reg, oi, false);
+    base = tcg_out_qemu_ldst_base(s, &h);
+
+    if (size_lg) {
+        uint64_t align_mask = (1u << size_lg) - 1;
+        tcg_out_logicali(s, I3404_ANDI, 0, TCG_REG_TMP0, base, align_mask);
+        slow_align = s->code_ptr;
+        tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_TMP0, 0);
+    }
+
+    if (ret_reg == new_reg && ret_reg != cmp_reg) {
+        tcg_out_mov(s, data_type, TCG_REG_TMP0, new_reg);
+        casal_new_reg = TCG_REG_TMP0;
+    }
+    if (ret_reg != cmp_reg) {
+        tcg_out_mov(s, data_type, ret_reg, cmp_reg);
+    }
+    if (casal_new_reg == ret_reg) {
+        tcg_out_mov(s, data_type, TCG_REG_TMP0, casal_new_reg);
+        casal_new_reg = TCG_REG_TMP0;
+    }
+    tcg_out_insn_3306_rmw(s, aarch64_qemu_atomic_insn(AA64_ATOMIC_CMPXCHG,
+                                                       size_lg),
+                          ret_reg, casal_new_reg, base);
+
+    if (slow_tlb || slow_align) {
+        const tcg_insn_unit *slow_tgt;
+        const tcg_insn_unit *done_tgt;
+
+        done = s->code_ptr;
+        tcg_out_insn(s, 3206, B, 0);
+
+        slow_tgt = tcg_splitwx_to_rx(s->code_ptr);
+        if (slow_tlb) {
+            tcg_debug_assert(reloc_pc_ldst(slow_tlb, slow_tgt));
+        }
+        if (slow_align) {
+            tcg_debug_assert(reloc_pc_ldst(slow_align, slow_tgt));
+        }
+        tcg_out_qemu_atomic_cmpxchg_helper_call(s, data_type, ret_reg,
+                                                cmp_reg, new_reg,
+                                                addr_reg, oi);
+
+        done_tgt = tcg_splitwx_to_rx(s->code_ptr);
+        tcg_debug_assert(reloc_pc_ldst(done, done_tgt));
+    }
+    return;
+
+helper:
+    tcg_out_qemu_atomic_cmpxchg_helper_call(s, data_type, ret_reg, cmp_reg,
+                                            new_reg, addr_reg, oi);
+}
+
+static void tgen_qemu_atomic_fetch_add(TCGContext *s, TCGType data_type,
+                                       TCGReg ret_reg, TCGReg val_reg,
+                                       TCGReg addr_reg, MemOpIdx oi)
+{
+    tgen_qemu_atomic_common(s, data_type, ret_reg, val_reg, addr_reg, oi,
+                            AA64_ATOMIC_FETCH_ADD);
+}
+
+static void tgen_qemu_atomic_fetch_and(TCGContext *s, TCGType data_type,
+                                       TCGReg ret_reg, TCGReg val_reg,
+                                       TCGReg addr_reg, MemOpIdx oi)
+{
+    tgen_qemu_atomic_common(s, data_type, ret_reg, val_reg, addr_reg, oi,
+                            AA64_ATOMIC_FETCH_AND);
+}
+
+static void tgen_qemu_atomic_fetch_or(TCGContext *s, TCGType data_type,
+                                      TCGReg ret_reg, TCGReg val_reg,
+                                      TCGReg addr_reg, MemOpIdx oi)
+{
+    tgen_qemu_atomic_common(s, data_type, ret_reg, val_reg, addr_reg, oi,
+                            AA64_ATOMIC_FETCH_OR);
+}
+
+static void tgen_qemu_atomic_fetch_xor(TCGContext *s, TCGType data_type,
+                                       TCGReg ret_reg, TCGReg val_reg,
+                                       TCGReg addr_reg, MemOpIdx oi)
+{
+    tgen_qemu_atomic_common(s, data_type, ret_reg, val_reg, addr_reg, oi,
+                            AA64_ATOMIC_FETCH_XOR);
+}
+
+static void tgen_qemu_atomic_xchg(TCGContext *s, TCGType data_type,
+                                  TCGReg ret_reg, TCGReg val_reg,
+                                  TCGReg addr_reg, MemOpIdx oi)
+{
+    tgen_qemu_atomic_common(s, data_type, ret_reg, val_reg, addr_reg, oi,
+                            AA64_ATOMIC_XCHG);
+}
+
+static const TCGOutOpQemuAtomicCmpxchg outop_qemu_atomic_cmpxchg = {
+    .base.static_constraint = C_O1_I3(r, r, r, r),
+    .out = tgen_qemu_atomic_cmpxchg,
+};
+
+static const TCGOutOpQemuAtomic outop_qemu_atomic_xchg = {
+    .base.static_constraint = C_O1_I2(r, r, r),
+    .out = tgen_qemu_atomic_xchg,
+};
+
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_add = {
+    .base.static_constraint = C_O1_I2(r, r, r),
+    .out = tgen_qemu_atomic_fetch_add,
+};
+
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_and = {
+    .base.static_constraint = C_O1_I2(r, r, r),
+    .out = tgen_qemu_atomic_fetch_and,
+};
+
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_or = {
+    .base.static_constraint = C_O1_I2(r, r, r),
+    .out = tgen_qemu_atomic_fetch_or,
+};
+
+static const TCGOutOpQemuAtomic outop_qemu_atomic_fetch_xor = {
+    .base.static_constraint = C_O1_I2(r, r, r),
+    .out = tgen_qemu_atomic_fetch_xor,
+};
 
 static void tcg_out_qemu_ldst_i128(TCGContext *s, TCGReg datalo, TCGReg datahi,
                                    TCGReg addr_reg, MemOpIdx oi, bool is_ld)
