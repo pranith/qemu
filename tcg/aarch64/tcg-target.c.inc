@@ -2486,6 +2486,7 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
                              TCGReg data_reg, TCGReg addr_reg, MemOpIdx oi)
 {
     TCGLabelQemuLdst *ldst, *misalign = NULL, *body = NULL;
+    tcg_insn_unit **misalign_ptr = NULL;
     HostAddress h;
     AArch64Insn insn;
     TCGReg base;
@@ -2525,7 +2526,18 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
     if (!can_use_stlr && use_native_acqrel && size_lg) {
         base = tcg_out_qemu_ldst_base(s, &h);
         align_mask = (1u << size_lg) - 1;
-        misalign = new_ldst_label(s);
+        if (tcg_use_softmmu && ldst != NULL) {
+            /*
+             * Coalesce softmmu TLB-miss and misalign branches to a single
+             * fallback stub: keep TLB branch in label_ptr[0] and attach
+             * misalign branch via label_ptr[1].
+             */
+            misalign = ldst;
+            misalign_ptr = &misalign->label_ptr[1];
+        } else {
+            misalign = new_ldst_label(s);
+            misalign_ptr = &misalign->label_ptr[0];
+        }
         misalign->is_ld = false;
         misalign->acqrel_fallback_entry = true;
         misalign->oi = oi;
@@ -2551,7 +2563,9 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
         }
 
         if (reuse_hoist) {
-            misalign->label_ptr[0] = s->code_ptr;
+            tcg_debug_assert(misalign_ptr != NULL);
+            tcg_debug_assert(*misalign_ptr == NULL);
+            *misalign_ptr = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
         } else {
             /*
@@ -2559,7 +2573,9 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
              * Use AND (not ANDS) so we do not clobber NZCV between guest ops.
              */
             tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
-            misalign->label_ptr[0] = s->code_ptr;
+            tcg_debug_assert(misalign_ptr != NULL);
+            tcg_debug_assert(*misalign_ptr == NULL);
+            *misalign_ptr = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
             s->acqrel_align_hoist_valid = false;
         }
