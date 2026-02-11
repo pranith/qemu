@@ -16,6 +16,12 @@
 # ifndef HWCAP2_BTI
 #  define HWCAP2_BTI 0  /* added in glibc 2.32 */
 # endif
+# ifndef HWCAP_ATOMICS
+#  define HWCAP_ATOMICS 0  /* added in Linux 4.11 */
+# endif
+# ifndef HWCAP_USCAT
+#  define HWCAP_USCAT 0  /* added in Linux 5.0 */
+# endif
 # ifndef HWCAP_ILRCPC
 #  define HWCAP_ILRCPC 0  /* added in Linux 4.17 */
 # endif
