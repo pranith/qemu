@@ -3707,31 +3707,57 @@ static const TCGOutOpQemuLdSt2 outop_qemu_st2 = {
 
 static const tcg_insn_unit *tb_ret_addr;
 
+static void tcg_out_far_branch_with_thunk(TCGContext *s,
+                                          const tcg_insn_unit *target,
+                                          const tcg_insn_unit **thunk)
+{
+    ptrdiff_t offset = tcg_pcrel_diff(s, target) >> 2;
+
+    if (offset == sextract64(offset, 0, 26)) {
+        tcg_out_insn(s, 3206, B, offset);
+        return;
+    }
+
+    if (*thunk) {
+        offset = tcg_pcrel_diff(s, *thunk) >> 2;
+        if (offset == sextract64(offset, 0, 26)) {
+            tcg_out_insn(s, 3206, B, offset);
+            return;
+        }
+    } else {
+        *thunk = tcg_splitwx_to_rx(s->code_ptr);
+    }
+
+    /*
+     * Fallback for the first out-of-range site (which materializes
+     * the thunk body), or if the thunk itself is unexpectedly out of
+     * range from this location.
+     */
+    tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP0, (intptr_t)target);
+    tcg_out_insn(s, 3207, BR, TCG_REG_TMP0);
+}
+
 static void tcg_out_exit_tb(TCGContext *s, uintptr_t a0)
 {
     const tcg_insn_unit *target;
-    ptrdiff_t offset;
+    const tcg_insn_unit **thunk;
 
     /* Reuse the zeroing that exists for goto_ptr.  */
     if (a0 == 0) {
         target = tcg_code_gen_epilogue;
+        thunk = &s->exit_tb_epilogue_thunk;
     } else {
         tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_X0, a0);
         target = tb_ret_addr;
+        thunk = &s->exit_tb_retaddr_thunk;
     }
 
-    offset = tcg_pcrel_diff(s, target) >> 2;
-    if (offset == sextract64(offset, 0, 26)) {
-        tcg_out_insn(s, 3206, B, offset);
-    } else {
-        /*
-         * Only x16/x17 generate BTI type Jump (2),
-         * other registers generate BTI type Jump|Call (3).
-         */
-        QEMU_BUILD_BUG_ON(TCG_REG_TMP0 != TCG_REG_X16);
-        tcg_out_movi(s, TCG_TYPE_I64, TCG_REG_TMP0, (intptr_t)target);
-        tcg_out_insn(s, 3207, BR, TCG_REG_TMP0);
-    }
+    /*
+     * Only x16/x17 generate BTI type Jump (2),
+     * other registers generate BTI type Jump|Call (3).
+     */
+    QEMU_BUILD_BUG_ON(TCG_REG_TMP0 != TCG_REG_X16);
+    tcg_out_far_branch_with_thunk(s, target, thunk);
 }
 
 static void tcg_out_goto_tb(TCGContext *s, int which)
@@ -5270,6 +5296,8 @@ static void tcg_target_qemu_prologue(TCGContext *s)
 
 static void tcg_out_tb_start(TCGContext *s)
 {
+    s->exit_tb_epilogue_thunk = NULL;
+    s->exit_tb_retaddr_thunk = NULL;
     tcg_out_bti(s, BTI_J);
 }
 

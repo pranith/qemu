@@ -386,6 +386,8 @@ struct TCGContext {
     TranslationBlock *gen_tb;     /* tb for which code is being generated */
     tcg_insn_unit *code_buf;      /* pointer for start of tb */
     tcg_insn_unit *code_ptr;      /* pointer for running end of tb */
+    const tcg_insn_unit *exit_tb_epilogue_thunk;
+    const tcg_insn_unit *exit_tb_retaddr_thunk;
 
 #ifdef CONFIG_DEBUG_TCG
     int goto_tb_issue_mask;
