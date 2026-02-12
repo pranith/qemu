@@ -3885,6 +3885,15 @@ static void tgen_and(TCGContext *s, TCGType type,
 static void tgen_andi(TCGContext *s, TCGType type,
                       TCGReg a0, TCGReg a1, tcg_target_long a2)
 {
+    /*
+     * Common x86 lowering pattern: and_i64 xN, xM, 0xffffffff.
+     * Emit a 32-bit move so the architectural zero-extension does
+     * the mask without a logical-immediate operation.
+     */
+    if (type == TCG_TYPE_I64 && (uint64_t)a2 == UINT32_MAX) {
+        tcg_out_ext32u(s, a0, a1);
+        return;
+    }
     tcg_out_logicali(s, I3404_ANDI, type, a0, a1, a2);
 }
 
@@ -4500,6 +4509,10 @@ static void tgen_extract(TCGContext *s, TCGType type, TCGReg a0, TCGReg a1,
                          unsigned ofs, unsigned len)
 {
     if (ofs == 0) {
+        if (type == TCG_TYPE_I64 && len == 32) {
+            tcg_out_ext32u(s, a0, a1);
+            return;
+        }
         uint64_t mask = MAKE_64BIT_MASK(0, len);
         tcg_out_logicali(s, I3404_ANDI, type, a0, a1, mask);
     } else {
