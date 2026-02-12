@@ -87,6 +87,7 @@ static TCGReg tcg_target_call_oarg_reg(TCGCallReturnKind kind, int slot)
 #define TCG_REG_TMP1 TCG_REG_X17
 #define TCG_REG_TMP2 TCG_REG_X30
 #define TCG_REG_ACQREL_ALIGN TCG_REG_X27
+#define TCG_REG_SOFTMMU_TLB_CHECK TCG_REG_X24
 #define TCG_REG_SOFTMMU_TLB_CMP TCG_REG_X25
 #define TCG_REG_SOFTMMU_TLB_ADDEND TCG_REG_X26
 #define TCG_VEC_TMP0 TCG_REG_V31
@@ -1965,6 +1966,9 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
             s->softmmu_tlb_hoist_valid &&
             s->softmmu_tlb_hoist_is_ld == is_ld &&
             s->softmmu_tlb_hoist_mem_index == mem_index;
+        bool reuse_addr_check = reuse_tlb_state &&
+            s->softmmu_tlb_check_hoist_valid &&
+            s->softmmu_tlb_check_hoist_oi == oi;
         TCGReg addr_adj;
         uint64_t compare_mask;
 
@@ -1972,6 +1976,25 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
         ldst->is_ld = is_ld;
         ldst->oi = oi;
         ldst->addr_reg = addr_reg;
+
+        if (reuse_addr_check) {
+            ldst->label_ptr[0] = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, addr_type,
+                         TCG_REG_SOFTMMU_TLB_CHECK, 0);
+
+            h->base = TCG_REG_SOFTMMU_TLB_ADDEND;
+            h->index = addr_reg;
+            h->index_ext = addr_type;
+
+            if (track_tlb_hoist) {
+                s->softmmu_tlb_hoist_valid = true;
+                s->softmmu_tlb_hoist_is_ld = is_ld;
+                s->softmmu_tlb_hoist_mem_index = mem_index;
+                s->softmmu_tlb_check_hoist_valid = true;
+                s->softmmu_tlb_check_hoist_oi = oi;
+            }
+            return ldst;
+        }
 
         if (!reuse_tlb_state) {
             /* Load CPUTLBDescFast.{mask,table} into {tmp0,tmp1}. */
@@ -2016,13 +2039,14 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
         tcg_out_logicali(s, I3404_ANDI, addr_type, TCG_REG_TMP2,
                          addr_adj, compare_mask);
 
-        /* Perform the address comparison. */
-        tcg_out_cmp(s, addr_type, TCG_COND_NE,
-                    TCG_REG_SOFTMMU_TLB_CMP, TCG_REG_TMP2, 0);
-
-        /* If not equal, we jump to the slow path. */
+        /*
+         * Compute comparator mismatch into a reserved register and branch
+         * on non-zero. This lets adjacent memory ops reuse the same check.
+         */
+        tcg_out_insn(s, 3510, EOR, addr_type, TCG_REG_SOFTMMU_TLB_CHECK,
+                     TCG_REG_SOFTMMU_TLB_CMP, TCG_REG_TMP2);
         ldst->label_ptr[0] = s->code_ptr;
-        tcg_out_insn(s, 3202, B_C, TCG_COND_NE, 0);
+        tcg_out_insn(s, 3201, CBNZ, addr_type, TCG_REG_SOFTMMU_TLB_CHECK, 0);
 
         h->base = TCG_REG_SOFTMMU_TLB_ADDEND;
         h->index = addr_reg;
@@ -2032,6 +2056,8 @@ static TCGLabelQemuLdst *prepare_host_addr(TCGContext *s, HostAddress *h,
             s->softmmu_tlb_hoist_valid = true;
             s->softmmu_tlb_hoist_is_ld = is_ld;
             s->softmmu_tlb_hoist_mem_index = mem_index;
+            s->softmmu_tlb_check_hoist_valid = true;
+            s->softmmu_tlb_check_hoist_oi = oi;
         }
     } else {
         if (a_mask) {
@@ -5013,6 +5039,7 @@ static void tcg_target_init(TCGContext *s)
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_X18); /* platform register */
     tcg_regset_set_reg(s->reserved_regs, TCG_REG_ACQREL_ALIGN);
     if (tcg_use_softmmu) {
+        tcg_regset_set_reg(s->reserved_regs, TCG_REG_SOFTMMU_TLB_CHECK);
         tcg_regset_set_reg(s->reserved_regs, TCG_REG_SOFTMMU_TLB_CMP);
         tcg_regset_set_reg(s->reserved_regs, TCG_REG_SOFTMMU_TLB_ADDEND);
     }

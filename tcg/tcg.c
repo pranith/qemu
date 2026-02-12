@@ -2108,6 +2108,7 @@ void tcg_func_start(TCGContext *s)
     s->pending_st_rel_imm_anchor = NULL;
     s->acqrel_align_hoist_valid = false;
     s->softmmu_tlb_hoist_valid = false;
+    s->softmmu_tlb_check_hoist_valid = false;
 
 #ifdef CONFIG_DEBUG_TCG
     s->goto_tb_issue_mask = 0;
@@ -5732,6 +5733,7 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
             !s->softmmu_tlb_hoist_arg_valid ||
             op->args[1] != s->softmmu_tlb_hoist_arg) {
             s->softmmu_tlb_hoist_valid = false;
+            s->softmmu_tlb_check_hoist_valid = false;
             s->softmmu_tlb_hoist_arg_valid = false;
         }
     }

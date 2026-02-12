@@ -374,6 +374,8 @@ struct TCGContext {
     bool softmmu_tlb_hoist_arg_valid;
     TCGArg softmmu_tlb_hoist_arg;
     unsigned softmmu_tlb_hoist_mem_index;
+    bool softmmu_tlb_check_hoist_valid;
+    MemOpIdx softmmu_tlb_check_hoist_oi;
 
     TCGRegSet reserved_regs;
     intptr_t current_frame_offset;
