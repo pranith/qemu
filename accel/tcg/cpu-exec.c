@@ -601,16 +601,19 @@ void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr)
 {
     /*
      * Get the rx view of the structure, from which we find the
-     * executable code address, and tb_target_set_jmp_target can
-     * produce a pc-relative displacement to jmp_target_addr[n].
+     * executable code address and patch the goto_tb instruction.
      */
     const TranslationBlock *c_tb = tcg_splitwx_to_rx(tb);
     uintptr_t offset = tb->jmp_insn_offset[n];
     uintptr_t jmp_rx = (uintptr_t)tb->tc.ptr + offset;
     uintptr_t jmp_rw = jmp_rx - tcg_splitwx_diff;
+    bool is_reset = tb->jmp_reset_offset[n] != TB_JMP_OFFSET_INVALID
+        && addr == (uintptr_t)(tb->tc.ptr + tb->jmp_reset_offset[n]);
 
-    tb->jmp_target_addr[n] = addr;
-    tb_target_set_jmp_target(c_tb, n, jmp_rx, jmp_rw);
+    if (!is_reset) {
+        tb->jmp_target_addr[n] = addr;
+    }
+    tb_target_set_jmp_target(c_tb, n, jmp_rx, jmp_rw, addr);
 }
 
 static inline void tb_add_jump(TranslationBlock *tb, int n,

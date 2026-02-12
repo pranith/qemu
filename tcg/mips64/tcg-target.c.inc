@@ -1445,7 +1445,8 @@ static void tcg_out_goto_ptr(TCGContext *s, TCGReg a0)
 }
 
 void tb_target_set_jmp_target(const TranslationBlock *tb, int n,
-                              uintptr_t jmp_rx, uintptr_t jmp_rw)
+                              uintptr_t jmp_rx, uintptr_t jmp_rw,
+                              uintptr_t addr)
 {
     /* Always indirect, nothing to do */
 }
