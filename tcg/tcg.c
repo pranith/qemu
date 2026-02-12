@@ -2107,6 +2107,7 @@ void tcg_func_start(TCGContext *s)
     s->pending_st_rel_imm_valid = false;
     s->pending_st_rel_imm_anchor = NULL;
     s->acqrel_align_hoist_valid = false;
+    s->softmmu_tlb_hoist_valid = false;
 
 #ifdef CONFIG_DEBUG_TCG
     s->goto_tb_issue_mask = 0;
@@ -5715,6 +5716,37 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
             s->acqrel_align_hoist_arg = op->args[1];
         } else {
             s->acqrel_align_hoist_arg_valid = false;
+        }
+    }
+
+    /*
+     * AArch64 softmmu lowering may reuse prior TLB comparator/addend state
+     * only across immediately adjacent qemu_ld/qemu_st with the same address
+     * argument.
+     */
+    if (s->softmmu_tlb_hoist_valid) {
+        if ((def->flags & (TCG_OPF_COND_BRANCH | TCG_OPF_BB_END)) ||
+            op->opc == INDEX_op_set_label ||
+            (op->opc != INDEX_op_qemu_ld && op->opc != INDEX_op_qemu_st) ||
+            const_args[1] ||
+            !s->softmmu_tlb_hoist_arg_valid ||
+            op->args[1] != s->softmmu_tlb_hoist_arg) {
+            s->softmmu_tlb_hoist_valid = false;
+            s->softmmu_tlb_hoist_arg_valid = false;
+        }
+    }
+
+    if (op->opc == INDEX_op_qemu_ld || op->opc == INDEX_op_qemu_st) {
+        /*
+         * qemu_ld with out==addr rewrites the address temp, so do not allow
+         * reuse beyond this op.
+         */
+        if (!const_args[1] &&
+            !(op->opc == INDEX_op_qemu_ld && op->args[0] == op->args[1])) {
+            s->softmmu_tlb_hoist_arg_valid = true;
+            s->softmmu_tlb_hoist_arg = op->args[1];
+        } else {
+            s->softmmu_tlb_hoist_arg_valid = false;
         }
     }
 
