@@ -1724,7 +1724,8 @@ static const TCGLdstHelperParam ldst_helper_param = {
 static TCGLabelQemuLdst *get_acqrel_fallback_body(TCGContext *s, bool is_ld,
                                                   MemOpIdx oi, TCGType type,
                                                   TCGReg base_reg,
-                                                  TCGReg data_reg)
+                                                  TCGReg data_reg,
+                                                  bool helper)
 {
     TCGLabelQemuLdst *lb;
     bool ret_lr = true;
@@ -1745,6 +1746,7 @@ static TCGLabelQemuLdst *get_acqrel_fallback_body(TCGContext *s, bool is_ld,
         if (lb->acqrel_fallback_body &&
             lb->is_ld == is_ld &&
             lb->acqrel_fallback_canon == canon &&
+            lb->acqrel_fallback_helper == helper &&
             lb->acqrel_fallback_ret_lr == ret_lr &&
             lb->oi == oi &&
             lb->type == type &&
@@ -1758,9 +1760,11 @@ static TCGLabelQemuLdst *get_acqrel_fallback_body(TCGContext *s, bool is_ld,
     lb->is_ld = is_ld;
     lb->acqrel_fallback_body = true;
     lb->acqrel_fallback_canon = canon;
+    lb->acqrel_fallback_helper = helper;
     lb->acqrel_fallback_ret_lr = ret_lr;
     lb->oi = oi;
     lb->type = type;
+    lb->addr_reg = helper ? TCG_REG_ACQREL_ALIGN : 0;
     lb->base_reg = base_reg;
     lb->datalo_reg = data_reg;
     return lb;
@@ -1779,10 +1783,17 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
             return true;
         }
         lb->raddr = tcg_splitwx_to_rx(s->code_ptr);
-        h.base = lb->base_reg;
-        h.index = TCG_REG_XZR;
-        h.index_ext = TCG_TYPE_I64;
-        tcg_out_qemu_ld_direct_acq(s, opc, lb->type, lb->datalo_reg, h.base);
+        if (lb->acqrel_fallback_helper) {
+            tcg_out_ld_helper_args(s, lb, &ldst_helper_param);
+            tcg_out_call_int(s, qemu_ld_helpers[opc & MO_SIZE]);
+            tcg_out_ld_helper_ret(s, lb, false, &ldst_helper_param);
+            tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+        } else {
+            h.base = lb->base_reg;
+            h.index = TCG_REG_XZR;
+            h.index_ext = TCG_TYPE_I64;
+            tcg_out_qemu_ld_direct_acq(s, opc, lb->type, lb->datalo_reg, h.base);
+        }
         tcg_out_insn(s, 3207, RET, TCG_REG_LR);
         return true;
     }
@@ -1817,14 +1828,33 @@ static bool tcg_out_qemu_ld_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
                                        h.base);
             tcg_out_goto(s, lb->raddr);
         } else if (lb->acqrel_fallback_target->acqrel_fallback_canon) {
-            if (lb->base_reg != TCG_REG_ACQREL_ALIGN) {
-                tcg_out_mov(s, TCG_TYPE_I64,
-                            TCG_REG_ACQREL_ALIGN, lb->base_reg);
-            }
-            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
-            if (lb->datalo_reg != TCG_REG_TMP1) {
-                tcg_out_mov(s, lb->type, lb->datalo_reg, TCG_REG_TMP1);
+            if (lb->acqrel_fallback_target->raddr == NULL) {
+                /*
+                 * The shared canonical body may not be emitted yet (forward
+                 * label in queue order). Inline this site as a correctness
+                 * fallback, and later stubs can still call the shared body.
+                 */
+                if (lb->acqrel_fallback_target->acqrel_fallback_helper) {
+                    tcg_out_ld_helper_args(s, lb, &ldst_helper_param);
+                    tcg_out_call_int(s, qemu_ld_helpers[opc & MO_SIZE]);
+                    tcg_out_ld_helper_ret(s, lb, false, &ldst_helper_param);
+                    tcg_out_mb(s, TCG_MO_LD_LD | TCG_MO_LD_ST);
+                } else {
+                    h.base = lb->base_reg;
+                    h.index = TCG_REG_XZR;
+                    h.index_ext = TCG_TYPE_I64;
+                    tcg_out_qemu_ld_direct_acq(s, opc, lb->type,
+                                               lb->datalo_reg, h.base);
+                }
+            } else {
+                if (lb->base_reg != TCG_REG_ACQREL_ALIGN) {
+                    tcg_out_mov(s, TCG_TYPE_I64,
+                                TCG_REG_ACQREL_ALIGN, lb->base_reg);
+                }
+                tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
+                if (lb->datalo_reg != TCG_REG_TMP1) {
+                    tcg_out_mov(s, lb->type, lb->datalo_reg, TCG_REG_TMP1);
+                }
             }
             tcg_out_goto(s, lb->raddr);
         } else if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
@@ -1864,11 +1894,17 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
             return true;
         }
         lb->raddr = tcg_splitwx_to_rx(s->code_ptr);
-        h.base = lb->base_reg;
-        h.index = TCG_REG_XZR;
-        h.index_ext = TCG_TYPE_I64;
-        tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
-        tcg_out_qemu_st_direct(s, opc, lb->datalo_reg, h);
+        if (lb->acqrel_fallback_helper) {
+            tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+            tcg_out_st_helper_args(s, lb, &ldst_helper_param);
+            tcg_out_call_int(s, qemu_st_helpers[opc & MO_SIZE]);
+        } else {
+            h.base = lb->base_reg;
+            h.index = TCG_REG_XZR;
+            h.index_ext = TCG_TYPE_I64;
+            tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+            tcg_out_qemu_st_direct(s, opc, lb->datalo_reg, h);
+        }
         tcg_out_insn(s, 3207, RET, TCG_REG_LR);
         return true;
     }
@@ -1900,15 +1936,33 @@ static bool tcg_out_qemu_st_slow_path(TCGContext *s, TCGLabelQemuLdst *lb)
             tcg_out_qemu_st_direct(s, opc, lb->acqrel_fallback_target->datalo_reg, h);
             tcg_out_goto(s, lb->raddr);
         } else if (lb->acqrel_fallback_target->acqrel_fallback_canon) {
-            if (lb->base_reg != TCG_REG_ACQREL_ALIGN) {
-                tcg_out_mov(s, TCG_TYPE_I64,
-                            TCG_REG_ACQREL_ALIGN, lb->base_reg);
+            if (lb->acqrel_fallback_target->raddr == NULL) {
+                /*
+                 * The shared canonical body may not be emitted yet (forward
+                 * label in queue order). Inline this site as a correctness
+                 * fallback, and later stubs can still call the shared body.
+                 */
+                if (lb->acqrel_fallback_target->acqrel_fallback_helper) {
+                    tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+                    tcg_out_st_helper_args(s, lb, &ldst_helper_param);
+                    tcg_out_call_int(s, qemu_st_helpers[opc & MO_SIZE]);
+                } else {
+                    h.base = lb->base_reg;
+                    h.index = TCG_REG_XZR;
+                    h.index_ext = TCG_TYPE_I64;
+                    tcg_out_mb(s, TCG_MO_LD_ST | TCG_MO_ST_ST);
+                    tcg_out_qemu_st_direct(s, opc, lb->datalo_reg, h);
+                }
+            } else {
+                if (lb->base_reg != TCG_REG_ACQREL_ALIGN) {
+                    tcg_out_mov(s, TCG_TYPE_I64,
+                                TCG_REG_ACQREL_ALIGN, lb->base_reg);
+                }
+                if (lb->datalo_reg != TCG_REG_TMP1) {
+                    tcg_out_mov(s, lb->type, TCG_REG_TMP1, lb->datalo_reg);
+                }
+                tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
             }
-            if (lb->datalo_reg != TCG_REG_TMP1) {
-                tcg_out_mov(s, lb->type, TCG_REG_TMP1, lb->datalo_reg);
-            }
-            tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
-            tcg_out_call_int(s, lb->acqrel_fallback_target->raddr);
             tcg_out_goto(s, lb->raddr);
         } else if (lb->acqrel_fallback_target->acqrel_fallback_ret_lr) {
             tcg_debug_assert(lb->acqrel_fallback_target->raddr != NULL);
@@ -2326,10 +2380,19 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
         misalign->addr_reg = addr_reg;
         misalign->base_reg = base;
         misalign->datalo_reg = data_reg;
-        if (!tcg_use_softmmu) {
+        if (tcg_use_softmmu) {
+            /*
+             * Helper slow paths require per-site ra (resume address).
+             * Keep softmmu misalign fallback as a per-site entry stub.
+             */
+            misalign->base_reg = addr_reg;
+            body = NULL;
+        } else {
             body = get_acqrel_fallback_body(s, true, oi, data_type,
-                                            base, data_reg);
-            misalign->acqrel_fallback_target = body;
+                                            base, data_reg, false);
+        }
+        misalign->acqrel_fallback_target = body;
+        if (body) {
             body->acqrel_fallback_refcnt++;
         }
 
@@ -2537,8 +2600,13 @@ static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
         misalign->oi = oi;
         misalign->type = data_type;
         misalign->addr_reg = eff_addr;
-        misalign->base_reg = base;
+        misalign->base_reg = eff_addr;
         misalign->datalo_reg = data_reg;
+        /*
+         * Helper slow paths require per-site ra (resume address).
+         * Keep softmmu misalign fallback as a per-site entry stub.
+         */
+        misalign->acqrel_fallback_target = NULL;
 
         if (eff_addr == TCG_REG_ACQREL_ALIGN) {
             align_reg = TCG_REG_TMP1;
@@ -2696,10 +2764,19 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
         misalign->addr_reg = addr_reg;
         misalign->base_reg = base;
         misalign->datalo_reg = data_reg;
-        if (!tcg_use_softmmu) {
+        if (tcg_use_softmmu) {
+            /*
+             * Helper slow paths require per-site ra (resume address).
+             * Keep softmmu misalign fallback as a per-site entry stub.
+             */
+            misalign->base_reg = addr_reg;
+            body = NULL;
+        } else {
             body = get_acqrel_fallback_body(s, false, oi, data_type,
-                                            base, data_reg);
-            misalign->acqrel_fallback_target = body;
+                                            base, data_reg, false);
+        }
+        misalign->acqrel_fallback_target = body;
+        if (body) {
             body->acqrel_fallback_refcnt++;
         }
 
@@ -2863,8 +2940,13 @@ static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
         misalign->oi = oi;
         misalign->type = data_type;
         misalign->addr_reg = eff_addr;
-        misalign->base_reg = base;
+        misalign->base_reg = eff_addr;
         misalign->datalo_reg = data_reg;
+        /*
+         * Helper slow paths require per-site ra (resume address).
+         * Keep softmmu misalign fallback as a per-site entry stub.
+         */
+        misalign->acqrel_fallback_target = NULL;
 
         if (eff_addr == TCG_REG_ACQREL_ALIGN) {
             align_reg = TCG_REG_TMP1;
