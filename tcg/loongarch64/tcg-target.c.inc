@@ -1345,9 +1345,9 @@ static void tcg_out_goto_ptr(TCGContext *s, TCGReg a0)
 }
 
 void tb_target_set_jmp_target(const TranslationBlock *tb, int n,
-                              uintptr_t jmp_rx, uintptr_t jmp_rw)
+                              uintptr_t jmp_rx, uintptr_t jmp_rw,
+                              uintptr_t d_addr)
 {
-    uintptr_t d_addr = tb->jmp_target_addr[n];
     ptrdiff_t d_disp = (ptrdiff_t)(d_addr - jmp_rx) >> 2;
     tcg_insn_unit insn;
 

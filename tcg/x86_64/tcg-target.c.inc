@@ -2370,10 +2370,10 @@ static void tcg_out_goto_ptr(TCGContext *s, TCGReg a0)
 }
 
 void tb_target_set_jmp_target(const TranslationBlock *tb, int n,
-                              uintptr_t jmp_rx, uintptr_t jmp_rw)
+                              uintptr_t jmp_rx, uintptr_t jmp_rw,
+                              uintptr_t addr)
 {
     /* patch the branch destination */
-    uintptr_t addr = tb->jmp_target_addr[n];
     qatomic_set((int32_t *)jmp_rw, addr - (jmp_rx + 4));
     /* no need to flush icache explicitly */
 }
