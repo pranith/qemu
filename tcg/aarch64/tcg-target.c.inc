@@ -3626,7 +3626,6 @@ static void tcg_out_goto_tb(TCGContext *s, int which)
     tcg_out32(s, I3206_B);
     tcg_out_insn(s, 3207, BR, TCG_REG_TMP0);
     set_jmp_reset_offset(s, which);
-    tcg_out_bti(s, BTI_J);
 }
 
 static void tcg_out_goto_ptr(TCGContext *s, TCGReg a0)
