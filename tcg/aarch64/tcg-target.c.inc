@@ -2196,6 +2196,7 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
     unsigned size_lg = memop & MO_SIZE;
     uint64_t align_mask = 0;
     bool reuse_hoist = false;
+    bool hoistable_check = false;
     bool can_use_ldar;
     bool use_native_acqrel = true;
     TCGReg align_reg = TCG_REG_ACQREL_ALIGN;
@@ -2312,24 +2313,24 @@ static void tgen_qemu_ld_acq(TCGContext *s, TCGType data_type,
              */
             tcg_debug_assert(misalign_ptr != NULL);
             tcg_debug_assert(*misalign_ptr == NULL);
-            if (size_lg == MO_16) {
+            if (size_lg == MO_16 && align_reg != TCG_REG_ACQREL_ALIGN) {
                 /*
-                 * Keep the fast aligned path to one instruction:
+                 * x27 is unavailable, so use a branch-only guard:
                  *   tbz base,#0,fast
                  *   b   slow_path
-                 * Use B for slow_path so range is not limited to imm14.
+                 * Keep B for slow_path so range is not limited to imm14.
                  */
                 tcg_out_insn(s, 3205, TBZ, base, 0, 2);
                 *misalign_ptr = s->code_ptr;
                 tcg_out_insn(s, 3206, B, 0);
-                s->acqrel_align_hoist_valid = false;
             } else {
                 tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base,
                                  align_mask);
                 *misalign_ptr = s->code_ptr;
                 tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+                hoistable_check = (align_reg == TCG_REG_ACQREL_ALIGN);
             }
-            if (size_lg != MO_16 && align_reg == TCG_REG_ACQREL_ALIGN) {
+            if (hoistable_check) {
                 s->acqrel_align_hoist_valid = true;
                 s->acqrel_align_hoist_is_ld = true;
                 s->acqrel_align_hoist_addr = addr_reg;
@@ -2597,6 +2598,7 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
     unsigned size_lg = memop & MO_SIZE;
     uint64_t align_mask = 0;
     bool reuse_hoist = false;
+    bool hoistable_check = false;
     bool can_use_stlr;
     /*
      * Use native RCsc store-release (STLR*) for all store sizes, including
@@ -2681,18 +2683,18 @@ static void tgen_qemu_st_rel(TCGContext *s, TCGType data_type,
              */
             tcg_debug_assert(misalign_ptr != NULL);
             tcg_debug_assert(*misalign_ptr == NULL);
-            if (size_lg == MO_16) {
+            if (size_lg == MO_16 && align_reg != TCG_REG_ACQREL_ALIGN) {
                 tcg_out_insn(s, 3205, TBZ, base, 0, 2);
                 *misalign_ptr = s->code_ptr;
                 tcg_out_insn(s, 3206, B, 0);
-                s->acqrel_align_hoist_valid = false;
             } else {
                 tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base,
                                  align_mask);
                 *misalign_ptr = s->code_ptr;
                 tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+                hoistable_check = (align_reg == TCG_REG_ACQREL_ALIGN);
             }
-            if (size_lg != MO_16 && align_reg == TCG_REG_ACQREL_ALIGN) {
+            if (hoistable_check) {
                 s->acqrel_align_hoist_valid = true;
                 s->acqrel_align_hoist_is_ld = false;
                 s->acqrel_align_hoist_addr = addr_reg;
