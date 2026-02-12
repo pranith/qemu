@@ -369,6 +369,11 @@ struct TCGContext {
     TCGReg acqrel_align_hoist_addr;
     unsigned acqrel_align_hoist_size_lg;
     MemOpIdx acqrel_align_hoist_oi;
+    bool softmmu_tlb_hoist_valid;
+    bool softmmu_tlb_hoist_is_ld;
+    bool softmmu_tlb_hoist_arg_valid;
+    TCGArg softmmu_tlb_hoist_arg;
+    unsigned softmmu_tlb_hoist_mem_index;
 
     TCGRegSet reserved_regs;
     intptr_t current_frame_offset;
