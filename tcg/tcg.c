@@ -104,6 +104,7 @@ struct TCGLabelQemuLdst {
     bool acqrel_fallback_body;  /* shared out-of-line acq/rel fallback body */
     bool acqrel_fallback_ret_lr; /* shared body returns with RET if true */
     bool acqrel_fallback_canon; /* body uses canonical temp regs */
+    bool acqrel_fallback_helper; /* body dispatches via helper call */
     uint16_t acqrel_fallback_refcnt; /* number of entry stubs targeting body */
     MemOpIdx oi;
     TCGType type;           /* result type of a load */
