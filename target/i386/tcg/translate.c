@@ -2340,7 +2340,9 @@ static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num)
          * then we have also proven that the addition does not wrap.
          */
         if (!use_goto_tb || !translator_is_same_page(&s->base, new_pc)) {
-            tcg_gen_andi_tl(cpu_eip, cpu_eip, mask);
+            if (mask != (target_ulong)-1) {
+                tcg_gen_andi_tl(cpu_eip, cpu_eip, mask);
+            }
             use_goto_tb = false;
         }
     } else if (!CODE64(s)) {
