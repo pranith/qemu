@@ -2496,6 +2496,8 @@ static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
     TCGReg eff_addr = addr_reg;
     TCGReg align_reg = TCG_REG_ACQREL_ALIGN;
     uint64_t align_mask = 0;
+    bool reuse_hoist = false;
+    bool hoistable_check = false;
 
     if (disp < -256 || disp > 255) {
         goto fallback;
@@ -2608,11 +2610,20 @@ static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
          */
         misalign->acqrel_fallback_target = NULL;
 
+        reuse_hoist = (s->acqrel_align_hoist_valid &&
+                       s->acqrel_align_hoist_is_ld &&
+                       s->acqrel_align_hoist_addr == eff_addr &&
+                       s->acqrel_align_hoist_size_lg == size_lg &&
+                       s->acqrel_align_hoist_oi == oi);
+
         if (eff_addr == TCG_REG_ACQREL_ALIGN) {
             align_reg = TCG_REG_TMP1;
         }
         tcg_debug_assert(*misalign_ptr == NULL);
-        if (size_lg == MO_16) {
+        if (reuse_hoist) {
+            *misalign_ptr = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+        } else if (size_lg == MO_16 && align_reg != TCG_REG_ACQREL_ALIGN) {
             tcg_out_insn(s, 3205, TBZ, base, 0, 2);
             *misalign_ptr = s->code_ptr;
             tcg_out_insn(s, 3206, B, 0);
@@ -2620,8 +2631,17 @@ static void tgen_qemu_ld_acq_imm(TCGContext *s, TCGType data_type,
             tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
             *misalign_ptr = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+            hoistable_check = (align_reg == TCG_REG_ACQREL_ALIGN);
         }
-        s->acqrel_align_hoist_valid = false;
+        if (hoistable_check) {
+            s->acqrel_align_hoist_valid = true;
+            s->acqrel_align_hoist_is_ld = true;
+            s->acqrel_align_hoist_addr = eff_addr;
+            s->acqrel_align_hoist_size_lg = size_lg;
+            s->acqrel_align_hoist_oi = oi;
+        } else if (!reuse_hoist) {
+            s->acqrel_align_hoist_valid = false;
+        }
     }
 
     if (disp == 0) {
@@ -2869,6 +2889,8 @@ static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
     TCGReg eff_addr = addr_reg;
     TCGReg align_reg = TCG_REG_ACQREL_ALIGN;
     uint64_t align_mask = 0;
+    bool reuse_hoist = false;
+    bool hoistable_check = false;
 
     if (disp < -256 || disp > 255) {
         goto fallback;
@@ -2948,11 +2970,20 @@ static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
          */
         misalign->acqrel_fallback_target = NULL;
 
+        reuse_hoist = (s->acqrel_align_hoist_valid &&
+                       !s->acqrel_align_hoist_is_ld &&
+                       s->acqrel_align_hoist_addr == eff_addr &&
+                       s->acqrel_align_hoist_size_lg == size_lg &&
+                       s->acqrel_align_hoist_oi == oi);
+
         if (eff_addr == TCG_REG_ACQREL_ALIGN) {
             align_reg = TCG_REG_TMP1;
         }
         tcg_debug_assert(*misalign_ptr == NULL);
-        if (size_lg == MO_16) {
+        if (reuse_hoist) {
+            *misalign_ptr = s->code_ptr;
+            tcg_out_insn(s, 3201, CBNZ, 0, TCG_REG_ACQREL_ALIGN, 0);
+        } else if (size_lg == MO_16 && align_reg != TCG_REG_ACQREL_ALIGN) {
             tcg_out_insn(s, 3205, TBZ, base, 0, 2);
             *misalign_ptr = s->code_ptr;
             tcg_out_insn(s, 3206, B, 0);
@@ -2960,8 +2991,17 @@ static void tgen_qemu_st_rel_imm(TCGContext *s, TCGType data_type,
             tcg_out_logicali(s, I3404_ANDI, 0, align_reg, base, align_mask);
             *misalign_ptr = s->code_ptr;
             tcg_out_insn(s, 3201, CBNZ, 0, align_reg, 0);
+            hoistable_check = (align_reg == TCG_REG_ACQREL_ALIGN);
         }
-        s->acqrel_align_hoist_valid = false;
+        if (hoistable_check) {
+            s->acqrel_align_hoist_valid = true;
+            s->acqrel_align_hoist_is_ld = false;
+            s->acqrel_align_hoist_addr = eff_addr;
+            s->acqrel_align_hoist_size_lg = size_lg;
+            s->acqrel_align_hoist_oi = oi;
+        } else if (!reuse_hoist) {
+            s->acqrel_align_hoist_valid = false;
+        }
     }
 
     if (disp == 0) {

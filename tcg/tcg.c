@@ -5672,6 +5672,12 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
      * Keep this cache valid only across straight-line code and while the
      * cached address register is not redefined.
      */
+    bool is_acqrel_memop =
+        op->opc == INDEX_op_qemu_ld_acq ||
+        op->opc == INDEX_op_qemu_st_rel ||
+        op->opc == INDEX_op_qemu_ld_acq_imm ||
+        op->opc == INDEX_op_qemu_st_rel_imm;
+
     if (s->acqrel_align_hoist_valid) {
         bool clear_hoist = false;
         TCGReg old_hoist = s->acqrel_align_hoist_addr;
@@ -5679,12 +5685,11 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
         if (op->opc == INDEX_op_set_label ||
             (def->flags & (TCG_OPF_COND_BRANCH | TCG_OPF_BB_END))) {
             clear_hoist = true;
-        } else if (op->opc != INDEX_op_qemu_ld_acq &&
-                   op->opc != INDEX_op_qemu_st_rel) {
+        } else if (!is_acqrel_memop) {
             /*
-             * Reuse is only valid across immediately adjacent non-imm acq/rel
-             * qemu memory ops. Any other operation may change the address
-             * value associated with the cached check.
+             * Reuse is only valid across immediately adjacent acq/rel qemu
+             * memory ops. Any other operation may change the address value
+             * associated with the cached check.
              */
             clear_hoist = true;
         } else if (const_args[1] ||
@@ -5712,7 +5717,7 @@ static void tcg_reg_alloc_op(TCGContext *s, const TCGOp *op)
         }
     }
 
-    if (op->opc == INDEX_op_qemu_ld_acq || op->opc == INDEX_op_qemu_st_rel) {
+    if (is_acqrel_memop) {
         if (!const_args[1]) {
             s->acqrel_align_hoist_arg_valid = true;
             s->acqrel_align_hoist_arg = op->args[1];
