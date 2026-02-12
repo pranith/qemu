@@ -2311,7 +2311,8 @@ gen_eob(DisasContext *s, int mode)
 /* Jump to eip+diff, truncating the result to OT. */
 static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num)
 {
-    bool use_goto_tb = s->jmp_opt;
+    bool jmp_opt = s->jmp_opt && !(s->flags & HF_INHIBIT_IRQ_MASK);
+    bool use_goto_tb = jmp_opt;
     target_ulong mask = -1;
     target_ulong new_pc = s->pc + diff;
     target_ulong new_eip = new_pc - s->cs_base;
@@ -2358,7 +2359,7 @@ static void gen_jmp_rel(DisasContext *s, MemOp ot, int diff, int tb_num)
         if (!(tb_cflags(s->base.tb) & CF_PCREL)) {
             tcg_gen_movi_tl(cpu_eip, new_eip);
         }
-        if (s->jmp_opt) {
+        if (jmp_opt) {
             gen_eob(s, DISAS_JUMP);   /* jump to another page */
         } else {
             gen_eob(s, DISAS_EOB_ONLY);  /* exit to main loop */
@@ -3769,7 +3770,7 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
     dc->cpuid_7_1_eax_features = env->features[FEAT_7_1_EAX];
     dc->cpuid_xsave_features = env->features[FEAT_XSAVE];
     dc->jmp_opt = !((cflags & CF_NO_GOTO_TB) ||
-                    (flags & (HF_RF_MASK | HF_TF_MASK | HF_INHIBIT_IRQ_MASK)));
+                    (flags & (HF_RF_MASK | HF_TF_MASK)));
 
     dc->T0 = tcg_temp_new();
     dc->T1 = tcg_temp_new();
@@ -3878,7 +3879,7 @@ static void i386_tr_tb_stop(DisasContextBase *dcbase, CPUState *cpu)
          * the handling of hflags normally done by gen_eob().  We can
          * get here:
          * - for exception and interrupts
-         * - for jump optimization (which is disabled by INHIBIT_IRQ/RF/TF)
+         * - for jump optimization (disabled by RF/TF and runtime INHIBIT_IRQ)
          * - for VMRUN because RF/TF handling for the host is done after vmexit,
          *   and INHIBIT_IRQ is loaded from the VMCB
          * - for HLT/PAUSE/MWAIT to exit the main loop with specific EXCP_* values;
