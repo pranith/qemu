@@ -116,6 +116,13 @@ static void gen_st_i64(TCGv_i64 v, TCGTemp *addr, MemOpIdx oi)
 
 static void tcg_gen_req_mo(MemOpType motype)
 {
+    enum {
+        MEMSTATE_START = 0,
+        MEMSTATE_AFTER_LOAD = 1,
+        MEMSTATE_AFTER_STORE = 2,
+        MEMSTATE_AFTER_FENCE = 3,
+        MEMSTATE_AFTER_RMW = 4,
+    };
     TCGBar type = 0;
     bool guest_is_x86 = (tcg_ctx->guest_mo & TCG_MO_ST_LD) == 0;
 
@@ -123,34 +130,35 @@ static void tcg_gen_req_mo(MemOpType motype)
     defined(__riscv)
     if (guest_is_x86) {
         if (motype == LOAD) {
-            if (memState == START) {
+            if (memState == MEMSTATE_START) {
                 type = TCG_MO_LD_LD | TCG_MO_ST_LD;
-            } else if (memState == AFTER_LOAD) {
+            } else if (memState == MEMSTATE_AFTER_LOAD) {
                 type = TCG_MO_LD_LD;
-            } else if (memState == AFTER_RMW) {
+            } else if (memState == MEMSTATE_AFTER_RMW) {
                 type = TCG_MO_ST_LD;
             }
-            memState = AFTER_LOAD;
+            memState = MEMSTATE_AFTER_LOAD;
         } else if (motype == STORE) {
-            if (memState == START) {
+            if (memState == MEMSTATE_START) {
                 type = TCG_MO_LD_ST | TCG_MO_ST_ST;
-            } else if (memState == AFTER_LOAD) {
+            } else if (memState == MEMSTATE_AFTER_LOAD) {
                 type = TCG_MO_LD_ST;
-            } else if (memState == AFTER_STORE) {
+            } else if (memState == MEMSTATE_AFTER_STORE) {
                 type = TCG_MO_ST_ST;
-            } else if (memState == AFTER_RMW) {
+            } else if (memState == MEMSTATE_AFTER_RMW) {
                 type = TCG_MO_ST_ST;
             }
-            memState = AFTER_STORE;
+            memState = MEMSTATE_AFTER_STORE;
         } else if (motype == RMW) {
-            if (memState == START) {
+            if (memState == MEMSTATE_START) {
                 type = TCG_MO_ALL;
-            } else if (memState == AFTER_LOAD) {
+            } else if (memState == MEMSTATE_AFTER_LOAD) {
                 type = TCG_MO_LD_LD;
-            } else if (memState == AFTER_STORE || memState == AFTER_RMW) {
+            } else if (memState == MEMSTATE_AFTER_STORE ||
+                       memState == MEMSTATE_AFTER_RMW) {
                 type = TCG_MO_ST_LD;
             }
-            memState = AFTER_RMW;
+            memState = MEMSTATE_AFTER_RMW;
         }
     } else if (motype == LOAD) {
         type = TCG_MO_LD_LD | TCG_MO_ST_LD;
