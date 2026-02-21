@@ -117,46 +117,55 @@ static void gen_st_i64(TCGv_i64 v, TCGTemp *addr, MemOpIdx oi)
 static void tcg_gen_req_mo(MemOpType motype)
 {
     TCGBar type = 0;
+    bool guest_is_x86 = (tcg_ctx->guest_mo & TCG_MO_ST_LD) == 0;
 
-#if (defined(TARGET_I386) || defined(TARGET_X86_64)) && \
-    (defined(__arm__) || defined(__arm) || defined(__aarch64__) || \
-     defined(__riscv))
-    if (motype == LOAD) {
-        if (memState == START) {
-            type = TCG_MO_LD_LD | TCG_MO_ST_LD;
-        } else if (memState == AFTER_LOAD) {
-            type = TCG_MO_LD_LD;
-        } else if (memState == AFTER_RMW) {
-            type = TCG_MO_ST_LD;
+#if defined(__arm__) || defined(__arm) || defined(__aarch64__) || \
+    defined(__riscv)
+    if (guest_is_x86) {
+        if (motype == LOAD) {
+            if (memState == START) {
+                type = TCG_MO_LD_LD | TCG_MO_ST_LD;
+            } else if (memState == AFTER_LOAD) {
+                type = TCG_MO_LD_LD;
+            } else if (memState == AFTER_RMW) {
+                type = TCG_MO_ST_LD;
+            }
+            memState = AFTER_LOAD;
+        } else if (motype == STORE) {
+            if (memState == START) {
+                type = TCG_MO_LD_ST | TCG_MO_ST_ST;
+            } else if (memState == AFTER_LOAD) {
+                type = TCG_MO_LD_ST;
+            } else if (memState == AFTER_STORE) {
+                type = TCG_MO_ST_ST;
+            } else if (memState == AFTER_RMW) {
+                type = TCG_MO_ST_ST;
+            }
+            memState = AFTER_STORE;
+        } else if (motype == RMW) {
+            if (memState == START) {
+                type = TCG_MO_ALL;
+            } else if (memState == AFTER_LOAD) {
+                type = TCG_MO_LD_LD;
+            } else if (memState == AFTER_STORE || memState == AFTER_RMW) {
+                type = TCG_MO_ST_LD;
+            }
+            memState = AFTER_RMW;
         }
-        memState = AFTER_LOAD;
-    } else if (motype == STORE) {
-        if (memState == START) {
-            type = TCG_MO_LD_ST | TCG_MO_ST_ST;
-        } else if (memState == AFTER_LOAD) {
-            type = TCG_MO_LD_ST;
-        } else if (memState == AFTER_STORE) {
-            type = TCG_MO_ST_ST;
-        } else if (memState == AFTER_RMW) {
-            type = TCG_MO_ST_ST;
-        }
-        memState = AFTER_STORE;
-    } else if (motype == RMW) {
-        if (memState == START) {
-            type = TCG_MO_ALL;
-        } else if (memState == AFTER_LOAD) {
-            type = TCG_MO_LD_LD;
-        } else if (memState == AFTER_STORE || memState == AFTER_RMW) {
-            type = TCG_MO_ST_LD;
-        }
-        memState = AFTER_RMW;
+    } else if (motype == LOAD) {
+        type = TCG_MO_LD_LD | TCG_MO_ST_LD;
+    } else {
+        type = TCG_MO_LD_ST | TCG_MO_ST_ST;
     }
-#elif (defined(TARGET_AARCH64) || defined(TARGET_ARM) ||                 \
-       defined(TARGET_RISCV) || defined(TARGET_RISCV32) ||               \
-       defined(TARGET_RISCV64)) &&                                        \
-      (defined(__i386) || defined(__i386__) || defined(__x86_64) ||      \
-       defined(__x86_64__))
-    /* keep default behaviour for these host/guest combinations */
+#elif defined(__i386) || defined(__i386__) || defined(__x86_64) || \
+      defined(__x86_64__)
+    if (guest_is_x86) {
+        if (motype == LOAD) {
+            type = TCG_MO_LD_LD | TCG_MO_ST_LD;
+        } else {
+            type = TCG_MO_LD_ST | TCG_MO_ST_ST;
+        }
+    }
 #else
     if (motype == LOAD) {
         type = TCG_MO_LD_LD | TCG_MO_ST_LD;
