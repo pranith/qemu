@@ -34,6 +34,18 @@
 #include "tcg-has.h"
 #include "tcg-target-mo.h"
 
+/*
+ * Complete the forward declaration from include/qemu/typedefs.h so memState
+ * can be compared/assigned in this translation unit.
+ */
+enum MemState {
+    START = 0,
+    AFTER_LOAD,
+    AFTER_STORE,
+    AFTER_FENCE,
+    AFTER_RMW,
+};
+
 static void check_max_alignment(unsigned a_bits)
 {
     /*
