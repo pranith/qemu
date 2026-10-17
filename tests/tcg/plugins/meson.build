@@ -6,6 +6,7 @@ test_plugins_src = [
 'insn.c',
 'mem.c',
 'patch.c',
+'analysis-api.c',
 'registers.c',
 'reset.c',
 'setpc.c',

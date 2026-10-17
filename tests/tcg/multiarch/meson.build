@@ -128,6 +128,12 @@ tests += {
 }
 
 # Specific plugin tests
+tests += {
+  multiarch/'plugin/test-plugin-analysis-api.c': {
+    'plugin_test': {'plugin': 'analysis-api', 'args': ['image=on']},
+  },
+}
+
 # Test plugin memory access instrumentation
 tests += {
   multiarch/'plugin/test-plugin-mem-access.c': {

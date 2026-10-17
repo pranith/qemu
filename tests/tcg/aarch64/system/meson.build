@@ -31,6 +31,11 @@ foreach t: tcg_tests['multiarch-softmmu']['tests']
 endforeach
 
 tests += {
+  'analysis-api-system.S': {
+    'cflags': ['-nostdlib', '-static', '-Wl,-Ttext=0x40080000'],
+    'qemu_args': ['-m', '512M', qemu_def_args],
+    'plugin_test': {'plugin': 'analysis-api'},
+  },
   '../../multiarch/system/memory.c': {
     'exe_name': 'memory-sve',
     'cc_feat': 'sve',
