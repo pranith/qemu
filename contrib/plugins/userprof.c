@@ -51,9 +51,19 @@ typedef struct Counters {
     uint64_t failed_cas;
 } Counters;
 
+typedef struct AtomicAddress {
+    uint64_t addr; /* Keep first for g_int64_hash. */
+    uint64_t accesses;
+    uint64_t failed_cas;
+    uint64_t thread_mask;
+    Site *site;
+} AtomicAddress;
+
 typedef struct ThreadStats {
     uint32_t slot;
     GHashTable *counters; /* Site * -> Counters *; only this thread writes */
+    GHashTable *atomic_addresses;
+    uint64_t dropped_addresses;
 } ThreadStats;
 
 static GMutex data_lock;
@@ -67,7 +77,9 @@ static uint32_t next_thread_slot;
 static __thread ThreadStats *thread_stats;
 static char *image_filter;
 static bool verbose_events;
+static bool report_atomic_addresses;
 static unsigned int top_n = 20;
+#define ATOMIC_ADDRESS_LIMIT 100000
 
 static void mapping_free(gpointer ptr)
 {
@@ -91,6 +103,7 @@ static void thread_stats_free(gpointer ptr)
     ThreadStats *stats = ptr;
 
     g_hash_table_destroy(stats->counters);
+    g_hash_table_destroy(stats->atomic_addresses);
     g_free(stats);
 }
 
@@ -103,6 +116,9 @@ static ThreadStats *get_thread_stats(void)
                                          __ATOMIC_RELAXED);
         stats->counters = g_hash_table_new_full(g_direct_hash, g_direct_equal,
                                                  NULL, g_free);
+        stats->atomic_addresses = g_hash_table_new_full(g_int64_hash,
+                                                        g_int64_equal,
+                                                        NULL, g_free);
         g_mutex_lock(&data_lock);
         g_ptr_array_add(thread_stats_all, stats);
         g_mutex_unlock(&data_lock);
@@ -318,6 +334,24 @@ static void mem_cb(unsigned int vcpu_index, qemu_plugin_meminfo_t info,
         if (!access.atomic_success) {
             c->failed_cas++;
         }
+        if (report_atomic_addresses) {
+            AtomicAddress *a = g_hash_table_lookup(stats->atomic_addresses,
+                                                    &addr);
+
+            if (!a && g_hash_table_size(stats->atomic_addresses) <
+                      ATOMIC_ADDRESS_LIMIT) {
+                a = g_new0(AtomicAddress, 1);
+                a->addr = addr;
+                a->site = s;
+                g_hash_table_insert(stats->atomic_addresses, &a->addr, a);
+            }
+            if (a) {
+                a->accesses++;
+                a->failed_cas += !access.atomic_success;
+            } else {
+                stats->dropped_addresses++;
+            }
+        }
     }
 }
 
@@ -369,6 +403,73 @@ static gint site_compare(gconstpointer a, gconstpointer b)
     uint64_t yc = y->reads + y->writes;
 
     return xc < yc ? 1 : xc > yc ? -1 : 0;
+}
+
+static gint address_compare(gconstpointer a, gconstpointer b)
+{
+    const AtomicAddress *x = a;
+    const AtomicAddress *y = b;
+
+    return x->accesses < y->accesses ? 1 :
+           x->accesses > y->accesses ? -1 : 0;
+}
+
+static void append_atomic_addresses(GString *out)
+{
+    GHashTable *merged = g_hash_table_new_full(g_int64_hash, g_int64_equal,
+                                                NULL, g_free);
+    uint64_t dropped = 0;
+    unsigned int shown = 0;
+
+    for (guint i = 0; i < thread_stats_all->len; i++) {
+        ThreadStats *stats = g_ptr_array_index(thread_stats_all, i);
+        GHashTableIter iter;
+        gpointer value;
+
+        dropped += stats->dropped_addresses;
+        g_hash_table_iter_init(&iter, stats->atomic_addresses);
+        while (g_hash_table_iter_next(&iter, NULL, &value)) {
+            AtomicAddress *a = value;
+            AtomicAddress *sum = g_hash_table_lookup(merged, &a->addr);
+
+            if (!sum) {
+                sum = g_new0(AtomicAddress, 1);
+                sum->addr = a->addr;
+                sum->site = a->site;
+                g_hash_table_insert(merged, &sum->addr, sum);
+            }
+            sum->accesses += a->accesses;
+            sum->failed_cas += a->failed_cas;
+            if (stats->slot < 64) {
+                sum->thread_mask |= UINT64_C(1) << stats->slot;
+            }
+        }
+    }
+
+    GList *sorted = g_hash_table_get_values(merged);
+
+    sorted = g_list_sort(sorted, address_compare);
+    g_string_append_printf(out,
+        "shared atomic addresses (up to %u per thread; dropped=%" PRIu64
+        "):\n", ATOMIC_ADDRESS_LIMIT, dropped);
+    g_string_append(out,
+        "     address         accesses failed threads source\n");
+    for (GList *it = sorted; it && shown < top_n; it = it->next) {
+        AtomicAddress *a = it->data;
+        int threads = __builtin_popcountll(a->thread_mask);
+
+        if (threads < 2) {
+            continue;
+        }
+        g_string_append_printf(out,
+            "%016" PRIx64 " %10" PRIu64 " %6" PRIu64 " %7d %s%s%s\n",
+            a->addr, a->accesses, a->failed_cas, threads,
+            a->site->image, a->site->symbol ? " " : "",
+            a->site->symbol ? a->site->symbol : "");
+        shown++;
+    }
+    g_list_free(sorted);
+    g_hash_table_destroy(merged);
 }
 
 static void finish_cb(void *userdata)
@@ -434,6 +535,9 @@ static void finish_cb(void *userdata)
             s->image, s->symbol ? " " : "", s->symbol ? s->symbol : "");
         shown++;
     }
+    if (report_atomic_addresses) {
+        append_atomic_addresses(out);
+    }
     qemu_plugin_outs(out->str);
     g_list_free(sorted);
 }
@@ -453,6 +557,8 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
             image_filter = g_strdup(argv[i] + 6);
         } else if (!strcmp(argv[i], "events=on")) {
             verbose_events = true;
+        } else if (!strcmp(argv[i], "atomic_addrs=on")) {
+            report_atomic_addresses = true;
         } else {
             fprintf(stderr, "userprof: unknown option: %s\n", argv[i]);
             return -1;

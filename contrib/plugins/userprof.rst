@@ -26,6 +26,12 @@ Options:
 ``events=on``
   Log every task and mapping event. This can produce a large log.
 
+``atomic_addrs=on``
+  Report atomic addresses touched by two or more guest threads, ranked by
+  atomic access count. A per-thread cap of 100,000 distinct addresses limits
+  memory use; the report shows how many observations were dropped. Shared
+  access is a contention candidate, not a measured cache miss or stall.
+
 The ``offset`` column is a file offset, obtained from the executable mapping.
 For anonymous executable memory it is zero. Use the mapping path and offset
 with the matching binary for offline symbolization; ELF tools may require a
