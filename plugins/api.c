@@ -38,6 +38,7 @@
 #include "qemu/osdep.h"
 #include "qemu/main-loop.h"
 #include "qemu/plugin.h"
+#include "qemu/plugin-memory.h"
 #include "qemu/log.h"
 #include "system/memory.h"
 #include "accel/tcg/cpu-loop.h"
@@ -353,6 +354,33 @@ bool qemu_plugin_mem_is_big_endian(qemu_plugin_meminfo_t info)
 bool qemu_plugin_mem_is_store(qemu_plugin_meminfo_t info)
 {
     return get_plugin_meminfo_rw(info) & QEMU_PLUGIN_MEM_W;
+}
+
+bool qemu_plugin_mem_is_atomic(qemu_plugin_meminfo_t info)
+{
+    return info & QEMU_PLUGIN_MEMINFO_ATOMIC;
+}
+
+void qemu_plugin_mem_get_access_info(qemu_plugin_meminfo_t info,
+                                     uint64_t vaddr,
+                                     struct qemu_plugin_mem_access_info *access)
+{
+    struct qemu_plugin_hwaddr *hwaddr = qemu_plugin_get_hwaddr(info, vaddr);
+
+    access->size = 1U << qemu_plugin_mem_size_shift(info);
+    access->is_store = qemu_plugin_mem_is_store(info);
+    access->is_atomic = qemu_plugin_mem_is_atomic(info);
+    access->atomic_success = !(info & QEMU_PLUGIN_MEMINFO_ATOMIC_FAILED);
+    access->has_phys_addr = hwaddr != NULL;
+    access->has_ram_addr = hwaddr && hwaddr->has_ram_addr;
+    access->is_io = hwaddr && qemu_plugin_hwaddr_is_io(hwaddr);
+    access->phys_addr = hwaddr ? qemu_plugin_hwaddr_phys_addr(hwaddr) : 0;
+    access->ram_addr = access->has_ram_addr ? hwaddr->ram_addr : 0;
+}
+
+size_t qemu_plugin_target_page_size(void)
+{
+    return qemu_target_page_size();
 }
 
 qemu_plugin_mem_value qemu_plugin_mem_get_value(qemu_plugin_meminfo_t info)
@@ -697,4 +725,3 @@ uint64_t qemu_plugin_u64_sum(qemu_plugin_u64 entry)
     }
     return total;
 }
-

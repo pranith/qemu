@@ -1587,6 +1587,8 @@ bool tlb_plugin_lookup(CPUState *cpu, vaddr addr, int mmu_idx,
 
     full = &cpu->neg.tlb.d[mmu_idx].fulltlb[index];
     data->phys_addr = full->phys_addr | (addr & ~TARGET_PAGE_MASK);
+    data->has_ram_addr = memory_region_is_ram(full->section->mr);
+    data->ram_addr = data->has_ram_addr ? full->xlat_offset + addr : 0;
 
     /* We must have an iotlb entry for MMIO */
     if (full->slow_flags[access_type] & TLB_MMIO) {

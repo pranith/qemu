@@ -716,7 +716,8 @@ QEMU_DISABLE_CFI
 void qemu_plugin_vcpu_mem_cb(CPUState *cpu, uint64_t vaddr,
                              uint64_t value_low,
                              uint64_t value_high,
-                             MemOpIdx oi, enum qemu_plugin_mem_rw rw)
+                             MemOpIdx oi, enum qemu_plugin_mem_rw rw,
+                             bool atomic, bool atomic_success)
 {
     GArray *arr = cpu->neg.plugin_mem_cbs;
     size_t i;
@@ -738,8 +739,14 @@ void qemu_plugin_vcpu_mem_cb(CPUState *cpu, uint64_t vaddr,
                 qemu_plugin_set_cb_flags(cpu,
                     tcg_call_to_qemu_plugin_cb_flags(cb->regular.info->flags));
 
-                cb->regular.f.vcpu_mem(cpu->cpu_index,
-                                       make_plugin_meminfo(oi, rw),
+                qemu_plugin_meminfo_t info = atomic ?
+                    make_plugin_atomic_meminfo(oi, rw) :
+                    make_plugin_meminfo(oi, rw);
+                if (atomic && !atomic_success) {
+                    info |= QEMU_PLUGIN_MEMINFO_ATOMIC_FAILED;
+                }
+
+                cb->regular.f.vcpu_mem(cpu->cpu_index, info,
                                        vaddr, cb->regular.userp);
                 qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_NO_REGS);
             }

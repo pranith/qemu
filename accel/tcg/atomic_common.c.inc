@@ -13,6 +13,23 @@
  * See the COPYING file in the top-level directory.
  */
 
+static void atomic_trace_rmw_post_result(CPUArchState *env, uint64_t addr,
+                                         uint64_t read_value_low,
+                                         uint64_t read_value_high,
+                                         uint64_t write_value_low,
+                                         uint64_t write_value_high,
+                                         MemOpIdx oi, bool success)
+{
+    if (cpu_plugin_mem_cbs_enabled(env_cpu(env))) {
+        qemu_plugin_vcpu_mem_cb(env_cpu(env), addr,
+                                read_value_low, read_value_high,
+                                oi, QEMU_PLUGIN_MEM_R, true, success);
+        qemu_plugin_vcpu_mem_cb(env_cpu(env), addr,
+                                write_value_low, write_value_high,
+                                oi, QEMU_PLUGIN_MEM_W, true, success);
+    }
+}
+
 static void atomic_trace_rmw_post(CPUArchState *env, uint64_t addr,
                                   uint64_t read_value_low,
                                   uint64_t read_value_high,
@@ -20,14 +37,8 @@ static void atomic_trace_rmw_post(CPUArchState *env, uint64_t addr,
                                   uint64_t write_value_high,
                                   MemOpIdx oi)
 {
-    if (cpu_plugin_mem_cbs_enabled(env_cpu(env))) {
-        qemu_plugin_vcpu_mem_cb(env_cpu(env), addr,
-                                read_value_low, read_value_high,
-                                oi, QEMU_PLUGIN_MEM_R);
-        qemu_plugin_vcpu_mem_cb(env_cpu(env), addr,
-                                write_value_low, write_value_high,
-                                oi, QEMU_PLUGIN_MEM_W);
-    }
+    atomic_trace_rmw_post_result(env, addr, read_value_low, read_value_high,
+                                 write_value_low, write_value_high, oi, true);
 }
 
 /*

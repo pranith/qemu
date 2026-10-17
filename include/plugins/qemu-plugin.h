@@ -84,11 +84,18 @@ typedef uint64_t qemu_plugin_id_t;
  * version 7:
  * - add userdata to all plugin callbacks, allowing maintenance of state
  *   externally, and easing interfacing with other languages.
+ *
+ * version 8 (local experiment):
+ * - add qemu_plugin_mem_get_access_info, qemu_plugin_mem_is_atomic,
+ *   and qemu_plugin_target_page_size; expose the backing RAM offset
+ *
+ * version 9 (local experiment):
+ * - report whether an atomic compare-and-swap committed its store
  */
 
 extern QEMU_PLUGIN_EXPORT int qemu_plugin_version;
 
-#define QEMU_PLUGIN_VERSION 7
+#define QEMU_PLUGIN_VERSION 9
 
 /**
  * struct qemu_info_t - system information for plugins
@@ -681,10 +688,78 @@ QEMU_PLUGIN_API
 bool qemu_plugin_mem_is_store(qemu_plugin_meminfo_t info);
 
 /**
+ * qemu_plugin_mem_is_atomic() - was this access part of an atomic RMW
+ * @info: opaque memory transaction handle
+ *
+ * Returns: true for the load and store callbacks of an atomic RMW.
+ */
+QEMU_PLUGIN_API
+bool qemu_plugin_mem_is_atomic(qemu_plugin_meminfo_t info);
+
+/**
+ * struct qemu_plugin_mem_access_info - common memory access properties
+ * @size: number of bytes accessed
+ * @is_store: whether this callback describes a store or store attempt
+ * @is_atomic: whether this access is part of an atomic RMW
+ * @atomic_success: whether the atomic operation committed its store;
+ *                  false for a failed compare-and-swap attempt. True for
+ *                  non-atomic accesses.
+ * @has_phys_addr: whether the physical address is available
+ * @has_ram_addr: whether the access targets a RAM backing allocation
+ * @is_io: whether the access targets MMIO, if @has_phys_addr is true
+ * @phys_addr: physical address of the first byte, if available
+ * @ram_addr: offset in QEMU RAM backing, if @has_ram_addr is true
+ *
+ * The physical address may not be unique across address spaces. An access
+ * spanning pages is not guaranteed to occupy consecutive physical addresses.
+ * The RAM offset can group aliases of the same backing memory but is valid
+ * only within the current QEMU process and may change after migration.
+ */
+struct qemu_plugin_mem_access_info {
+    size_t size;
+    bool is_store;
+    bool is_atomic;
+    bool atomic_success;
+    bool has_phys_addr;
+    bool has_ram_addr;
+    bool is_io;
+    uint64_t phys_addr;
+    uint64_t ram_addr;
+};
+
+/**
+ * qemu_plugin_mem_get_access_info() - query common access properties
+ * @info: opaque memory transaction handle
+ * @vaddr: virtual address passed to the memory callback
+ * @access: caller-owned result
+ *
+ * In system emulation the physical address is queried for the current
+ * operation. In user-mode @has_phys_addr is false. This function is valid
+ * only during the memory callback that supplied @info and @vaddr.
+ */
+QEMU_PLUGIN_API
+void qemu_plugin_mem_get_access_info(qemu_plugin_meminfo_t info,
+                                     uint64_t vaddr,
+                                     struct qemu_plugin_mem_access_info
+                                     *access);
+
+/**
+ * qemu_plugin_target_page_size() - smallest guest translation page size
+ *
+ * Returns: target page size in bytes. Call this after vCPU initialization.
+ * This is not necessarily the Linux base page size or a mapped hugepage size.
+ */
+QEMU_PLUGIN_API
+size_t qemu_plugin_target_page_size(void);
+
+/**
  * qemu_plugin_mem_get_value() - return last value loaded/stored
  * @info: opaque memory transaction handle
  *
  * Returns: memory value in host-endian order (no further swap is necessary).
+ * For an atomic RMW store callback, this may be the operation's operand or
+ * requested value rather than the value actually stored. Use
+ * qemu_plugin_mem_get_access_info() to check compare-and-swap success.
  */
 QEMU_PLUGIN_API
 qemu_plugin_mem_value qemu_plugin_mem_get_value(qemu_plugin_meminfo_t info);

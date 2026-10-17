@@ -14,7 +14,9 @@
 struct qemu_plugin_hwaddr {
     bool is_io;
     bool is_store;
+    bool has_ram_addr;
     hwaddr phys_addr;
+    uint64_t ram_addr;
     MemoryRegion *mr;
 };
 

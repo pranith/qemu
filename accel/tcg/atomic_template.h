@@ -56,9 +56,11 @@
 #if DATA_SIZE == 16
 # define VALUE_LOW(val) int128_getlo(val)
 # define VALUE_HIGH(val) int128_gethi(val)
+# define VALUE_EQUAL(a, b) int128_eq(a, b)
 #else
 # define VALUE_LOW(val) val
 # define VALUE_HIGH(val) 0
+# define VALUE_EQUAL(a, b) ((a) == (b))
 #endif
 
 #if DATA_SIZE >= 4
@@ -91,12 +93,12 @@ ABI_TYPE ATOMIC_NAME(cmpxchg)(CPUArchState *env, vaddr addr,
     ret = qatomic_cmpxchg__nocheck(haddr, cmpv, newv);
 #endif
     ATOMIC_MMU_CLEANUP;
-    atomic_trace_rmw_post(env, addr,
+    atomic_trace_rmw_post_result(env, addr,
                           VALUE_LOW(ret),
                           VALUE_HIGH(ret),
                           VALUE_LOW(newv),
                           VALUE_HIGH(newv),
-                          oi);
+                          oi, VALUE_EQUAL(ret, cmpv));
     return ret;
 }
 
@@ -252,12 +254,12 @@ ABI_TYPE ATOMIC_NAME(cmpxchg)(CPUArchState *env, vaddr addr,
     ret = qatomic_cmpxchg__nocheck(haddr, BSWAP(cmpv), BSWAP(newv));
 #endif
     ATOMIC_MMU_CLEANUP;
-    atomic_trace_rmw_post(env, addr,
+    atomic_trace_rmw_post_result(env, addr,
                           VALUE_LOW(ret),
                           VALUE_HIGH(ret),
                           VALUE_LOW(newv),
                           VALUE_HIGH(newv),
-                          oi);
+                          oi, VALUE_EQUAL(ret, BSWAP(cmpv)));
     return BSWAP(ret);
 }
 
@@ -403,3 +405,4 @@ GEN_ATOMIC_HELPER_FN(add_fetch, ADD, DATA_TYPE, new)
 #undef SHIFT
 #undef VALUE_LOW
 #undef VALUE_HIGH
+#undef VALUE_EQUAL

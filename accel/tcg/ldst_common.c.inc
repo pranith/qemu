@@ -131,7 +131,7 @@ static void plugin_load_cb(CPUArchState *env, vaddr addr,
     if (cpu_plugin_mem_cbs_enabled(env_cpu(env))) {
         qemu_plugin_vcpu_mem_cb(env_cpu(env), addr,
                                 value_low, value_high,
-                                oi, QEMU_PLUGIN_MEM_R);
+                                oi, QEMU_PLUGIN_MEM_R, false, true);
     }
 }
 
@@ -201,7 +201,7 @@ static void plugin_store_cb(CPUArchState *env, vaddr addr,
     if (cpu_plugin_mem_cbs_enabled(env_cpu(env))) {
         qemu_plugin_vcpu_mem_cb(env_cpu(env), addr,
                                 value_low, value_high,
-                                oi, QEMU_PLUGIN_MEM_W);
+                                oi, QEMU_PLUGIN_MEM_W, false, true);
     }
 }
 

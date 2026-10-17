@@ -33,6 +33,15 @@ make_plugin_meminfo(MemOpIdx oi, enum qemu_plugin_mem_rw rw)
     return oi | (rw << 16);
 }
 
+#define QEMU_PLUGIN_MEMINFO_ATOMIC (1U << 18)
+#define QEMU_PLUGIN_MEMINFO_ATOMIC_FAILED (1U << 19)
+
+static inline qemu_plugin_meminfo_t
+make_plugin_atomic_meminfo(MemOpIdx oi, enum qemu_plugin_mem_rw rw)
+{
+    return make_plugin_meminfo(oi, rw) | QEMU_PLUGIN_MEMINFO_ATOMIC;
+}
+
 /*
  * Extract the memory operation direction from a qemu_plugin_meminfo_t.
  * Other portions may be extracted via get_memop and get_mmuidx.
@@ -40,7 +49,7 @@ make_plugin_meminfo(MemOpIdx oi, enum qemu_plugin_mem_rw rw)
 static inline enum qemu_plugin_mem_rw
 get_plugin_meminfo_rw(qemu_plugin_meminfo_t i)
 {
-    return i >> 16;
+    return (i >> 16) & QEMU_PLUGIN_MEM_RW;
 }
 
 #ifdef CONFIG_PLUGIN
@@ -177,7 +186,8 @@ qemu_plugin_vcpu_syscall_filter(CPUState *cpu, int64_t num, uint64_t a1,
 void qemu_plugin_vcpu_mem_cb(CPUState *cpu, uint64_t vaddr,
                              uint64_t value_low,
                              uint64_t value_high,
-                             MemOpIdx oi, enum qemu_plugin_mem_rw rw);
+                             MemOpIdx oi, enum qemu_plugin_mem_rw rw,
+                             bool atomic, bool atomic_success);
 
 void qemu_plugin_flush_cb(void);
 
@@ -297,7 +307,8 @@ static inline void qemu_plugin_vcpu_mem_cb(CPUState *cpu, uint64_t vaddr,
                                            uint64_t value_low,
                                            uint64_t value_high,
                                            MemOpIdx oi,
-                                           enum qemu_plugin_mem_rw rw)
+                                           enum qemu_plugin_mem_rw rw,
+                                           bool atomic, bool atomic_success)
 { }
 
 static inline void qemu_plugin_flush_cb(void)
