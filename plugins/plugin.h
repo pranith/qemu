@@ -110,6 +110,18 @@ void plugin_register_vcpu_mem_cb(GArray **arr,
                                  enum qemu_plugin_mem_rw rw,
                                  void *udata);
 
+void plugin_register_vcpu_mem_cond_cb(GArray **arr, void *cb,
+                                      enum qemu_plugin_cb_flags flags,
+                                      enum qemu_plugin_mem_rw rw,
+                                      enum qemu_plugin_cond cond,
+                                      qemu_plugin_u64 entry, uint64_t imm,
+                                      void *udata);
+
+void plugin_register_trace_cb(GArray **arr,
+                              struct qemu_plugin_trace_buffer *buffer,
+                              uint64_t pc, enum qemu_plugin_trace_kind kind,
+                              enum qemu_plugin_mem_rw rw);
+
 void exec_inline_op(enum plugin_dyn_cb_type type,
                     struct qemu_plugin_inline_cb *cb,
                     int cpu_index);
@@ -119,6 +131,9 @@ int plugin_num_vcpus(void);
 struct qemu_plugin_scoreboard *plugin_scoreboard_new(size_t element_size);
 
 void plugin_scoreboard_free(struct qemu_plugin_scoreboard *score);
+
+void plugin_vcpu_storage_exit(unsigned int vcpu_index);
+void plugin_vcpu_storage_cleanup(qemu_plugin_id_t id);
 
 /**
  * qemu_plugin_fillin_mode_info() - populate mode specific info

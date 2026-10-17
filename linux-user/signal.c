@@ -19,6 +19,7 @@
 #include "qemu/osdep.h"
 #include "qemu/bitops.h"
 #include "qemu/cutils.h"
+#include "qemu/plugin.h"
 #include "gdbstub/user.h"
 #include "exec/page-protection.h"
 #include "accel/tcg/cpu-ops.h"
@@ -856,6 +857,10 @@ void queue_signal(CPUArchState *env, int sig, int si_type,
     TaskState *ts = get_task_state(cpu);
 
     trace_user_queue_signal(env, sig);
+
+    qemu_plugin_user_signal_notify(sig, info->si_code,
+        si_type == QEMU_SI_FAULT,
+        si_type == QEMU_SI_FAULT ? info->_sifields._sigfault._addr : 0);
 
     info->si_code = deposit32(info->si_code, 16, 16, si_type);
 

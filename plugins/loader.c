@@ -335,6 +335,7 @@ static void plugin_reset_destroy__locked(struct qemu_plugin_reset_data *data)
     for (ev = 0; ev < QEMU_PLUGIN_EV_MAX; ev++) {
         plugin_unregister_cb__locked(ctx, ev);
     }
+    plugin_vcpu_storage_cleanup(ctx->id);
 
     if (data->reset) {
         g_assert(ctx->resetting);

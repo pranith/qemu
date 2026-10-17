@@ -20,6 +20,7 @@
 #include "qemu/rcu_queue.h"
 #include "qemu/rcu.h"
 #include "exec/tb-flush.h"
+#include "disas/disas.h"
 #include "tcg/tcg-op-common.h"
 #include "plugin.h"
 
@@ -50,6 +51,12 @@ static void plugin_cpu_update__async(CPUState *cpu, run_on_cpu_data data)
 {
     bitmap_copy(cpu->plugin_state->event_mask,
                 &data.host_ulong, QEMU_PLUGIN_EV_MAX);
+    if (!test_bit(QEMU_PLUGIN_EV_VCPU_TB_EDGE,
+                  cpu->plugin_state->event_mask) &&
+        !test_bit(QEMU_PLUGIN_EV_VCPU_ROUTINE,
+                  cpu->plugin_state->event_mask)) {
+        cpu->plugin_state->edge_pending = false;
+    }
     tcg_flush_jmp_cache(cpu);
 }
 
@@ -117,6 +124,8 @@ static void plugin_vcpu_cb__discon(CPUState *cpu,
     struct qemu_plugin_cb *cb, *next;
     uint64_t to = cpu->cc->get_pc(cpu);
 
+    cpu->plugin_state->edge_pending = false;
+
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_RW_REGS_PC);
     if (cpu->cpu_index < plugin.num_vcpus) {
         /* iterate safely; plugins might uninstall themselves at any time */
@@ -126,6 +135,68 @@ static void plugin_vcpu_cb__discon(CPUState *cpu,
         }
     }
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_NO_REGS);
+}
+
+void qemu_plugin_vcpu_tb_edge_exit(unsigned int vcpu_index, uint64_t from_pc,
+                                   uint64_t sequential_pc,
+                                   uint32_t from_properties)
+{
+    CPUPluginState *state = current_cpu->plugin_state;
+
+    g_assert(current_cpu->cpu_index == vcpu_index);
+    state->edge.from_pc = from_pc;
+    state->edge.sequential_pc = sequential_pc;
+    state->edge.from_properties = from_properties;
+    state->edge_pending = true;
+}
+
+QEMU_DISABLE_CFI
+void qemu_plugin_vcpu_tb_edge_entry(unsigned int vcpu_index, uint64_t to_pc)
+{
+    CPUPluginState *state = current_cpu->plugin_state;
+    struct qemu_plugin_cb *cb, *next;
+
+    g_assert(current_cpu->cpu_index == vcpu_index);
+    if (!state->edge_pending) {
+        return;
+    }
+    state->edge_pending = false;
+    state->edge.to_pc = to_pc;
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_EDGE],
+                           entry, next) {
+        cb->f.tb_edge(vcpu_index, &state->edge, cb->udata);
+    }
+
+    if (test_bit(QEMU_PLUGIN_EV_VCPU_ROUTINE, state->event_mask)) {
+        enum qemu_plugin_routine_event_type type;
+        const char *name;
+
+        if (state->edge.from_properties & QEMU_PLUGIN_INSN_CALL) {
+            type = QEMU_PLUGIN_ROUTINE_ENTRY;
+            name = lookup_symbol(to_pc);
+        } else if (state->edge.from_properties & QEMU_PLUGIN_INSN_RETURN) {
+            type = QEMU_PLUGIN_ROUTINE_RETURN;
+            name = lookup_symbol(state->edge.from_pc);
+        } else {
+            return;
+        }
+        if (!name || !name[0]) {
+            return;
+        }
+        struct qemu_plugin_routine_event event = {
+            .struct_size = sizeof(event),
+            .type = type,
+            .from_pc = state->edge.from_pc,
+            .to_pc = to_pc,
+            .name = name,
+        };
+        qemu_plugin_get_exec_context(&event.context, sizeof(event.context));
+        QLIST_FOREACH_SAFE_RCU(cb,
+                               &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_ROUTINE],
+                               entry, next) {
+            cb->f.routine(&event, cb->udata);
+        }
+    }
 }
 
 /*
@@ -287,6 +358,7 @@ void qemu_plugin_vcpu_exit_hook(CPUState *cpu)
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_RW_REGS);
     qemu_plugin_user_task_notify(QEMU_PLUGIN_USER_THREAD_EXIT, 0, NULL);
     plugin_vcpu_cb__udata(cpu, QEMU_PLUGIN_EV_VCPU_EXIT);
+    plugin_vcpu_storage_exit(cpu->cpu_index);
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_NO_REGS);
 
     assert(cpu->cpu_index != UNASSIGNED_CPU_INDEX);
@@ -473,6 +545,38 @@ void plugin_register_vcpu_mem_cb(GArray **arr,
     dyn_cb->regular = regular_cb;
 }
 
+void plugin_register_vcpu_mem_cond_cb(GArray **arr, void *cb,
+                                      enum qemu_plugin_cb_flags flags,
+                                      enum qemu_plugin_mem_rw rw,
+                                      enum qemu_plugin_cond cond,
+                                      qemu_plugin_u64 entry, uint64_t imm,
+                                      void *udata)
+{
+    plugin_register_vcpu_mem_cb(arr, cb, flags, rw, udata);
+    struct qemu_plugin_dyn_cb *dyn_cb =
+        &g_array_index(*arr, struct qemu_plugin_dyn_cb, (*arr)->len - 1);
+
+    dyn_cb->type = PLUGIN_CB_MEM_COND;
+    dyn_cb->regular.cond = cond;
+    dyn_cb->regular.entry = entry;
+    dyn_cb->regular.imm = imm;
+}
+
+void plugin_register_trace_cb(GArray **arr,
+                              struct qemu_plugin_trace_buffer *buffer,
+                              uint64_t pc, enum qemu_plugin_trace_kind kind,
+                              enum qemu_plugin_mem_rw rw)
+{
+    struct qemu_plugin_dyn_cb *dyn_cb = plugin_get_dyn_cb(arr);
+
+    dyn_cb->type = kind == QEMU_PLUGIN_TRACE_MEMORY ?
+                   PLUGIN_CB_MEM_TRACE : PLUGIN_CB_TRACE_INSN;
+    dyn_cb->trace.buffer = buffer;
+    dyn_cb->trace.pc = pc;
+    dyn_cb->trace.kind = kind;
+    dyn_cb->trace.rw = rw;
+}
+
 /*
  * Disable CFI checks.
  * The callback function has been loaded from an external library so we do not
@@ -633,6 +737,25 @@ void qemu_plugin_vcpu_exception_cb(CPUState *cpu, uint64_t from)
 {
     plugin_vcpu_cb__discon(cpu, QEMU_PLUGIN_EV_VCPU_EXCEPTION,
                            QEMU_PLUGIN_DISCON_EXCEPTION, from);
+
+    if (test_bit(QEMU_PLUGIN_EV_VCPU_EXCEPTION_DETAIL,
+                 cpu->plugin_state->event_mask)) {
+        struct qemu_plugin_exception_event event = {
+            .struct_size = sizeof(event),
+            .exception_index = cpu->exception_index,
+            .from_pc = from,
+            .to_pc = cpu->cc->get_pc(cpu),
+        };
+        struct qemu_plugin_cb *cb, *next;
+
+        qemu_plugin_get_exec_context(&event.context, sizeof(event.context));
+        QLIST_FOREACH_SAFE_RCU(cb,
+                               &plugin.cb_lists[
+                                   QEMU_PLUGIN_EV_VCPU_EXCEPTION_DETAIL],
+                               entry, next) {
+            cb->f.exception(&event, cb->udata);
+        }
+    }
 }
 
 void qemu_plugin_vcpu_hostcall_cb(CPUState *cpu, uint64_t from)
@@ -669,6 +792,14 @@ void qemu_plugin_register_vcpu_discon_cb(qemu_plugin_id_t id,
     if (type & QEMU_PLUGIN_DISCON_HOSTCALL) {
         plugin_register_cb_udata(id, QEMU_PLUGIN_EV_VCPU_HOSTCALL, cb, userdata);
     }
+}
+
+void qemu_plugin_register_exception_cb(qemu_plugin_id_t id,
+                                       qemu_plugin_exception_cb_t cb,
+                                       void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_VCPU_EXCEPTION_DETAIL,
+                             cb, userdata);
 }
 
 void qemu_plugin_register_flush_cb(qemu_plugin_id_t id,
@@ -714,6 +845,79 @@ void exec_inline_op(enum plugin_dyn_cb_type type,
     }
 }
 
+static bool plugin_mem_cond_matches(const struct qemu_plugin_regular_cb *cb,
+                                    unsigned int vcpu_index)
+{
+    uint64_t value = qemu_plugin_u64_get(cb->entry, vcpu_index);
+
+    switch (cb->cond) {
+    case QEMU_PLUGIN_COND_EQ:
+        return value == cb->imm;
+    case QEMU_PLUGIN_COND_NE:
+        return value != cb->imm;
+    case QEMU_PLUGIN_COND_LT:
+        return value < cb->imm;
+    case QEMU_PLUGIN_COND_LE:
+        return value <= cb->imm;
+    case QEMU_PLUGIN_COND_GT:
+        return value > cb->imm;
+    case QEMU_PLUGIN_COND_GE:
+        return value >= cb->imm;
+    default:
+        g_assert_not_reached();
+    }
+}
+
+QEMU_DISABLE_CFI
+void qemu_plugin_vcpu_mem_cond_wrapper(unsigned int vcpu_index,
+                                       qemu_plugin_meminfo_t info,
+                                       uint64_t vaddr, void *userdata)
+{
+    struct qemu_plugin_regular_cb *cb = userdata;
+
+    if (plugin_mem_cond_matches(cb, vcpu_index)) {
+        cb->f.vcpu_mem(vcpu_index, info, vaddr, cb->userp);
+    }
+}
+
+void qemu_plugin_trace_insn_record(unsigned int vcpu_index,
+                                   struct qemu_plugin_trace_buffer *buffer,
+                                   uint64_t pc, uint32_t kind)
+{
+    struct qemu_plugin_trace_record record = {
+        .pc = pc,
+        .kind = kind,
+    };
+
+    qemu_plugin_trace_buffer_append(buffer, vcpu_index, &record);
+}
+
+void qemu_plugin_trace_mem_record(unsigned int vcpu_index,
+                                  qemu_plugin_meminfo_t info,
+                                  uint64_t vaddr,
+                                  struct qemu_plugin_trace_buffer *buffer,
+                                  uint64_t pc)
+{
+    struct qemu_plugin_mem_access_info access;
+    struct qemu_plugin_trace_record record = {
+        .pc = pc,
+        .vaddr = vaddr,
+        .kind = QEMU_PLUGIN_TRACE_MEMORY,
+    };
+
+    qemu_plugin_mem_get_access_info(info, vaddr, &access);
+    record.size = access.size;
+    record.is_store = access.is_store;
+    record.is_atomic = access.is_atomic;
+    record.atomic_success = access.atomic_success;
+    record.has_phys_addr = access.has_phys_addr;
+    record.has_ram_addr = access.has_ram_addr;
+    record.is_io = access.is_io;
+    record.phys_addr = access.phys_addr;
+    record.ram_addr = access.ram_addr;
+    qemu_plugin_trace_buffer_append(buffer, vcpu_index, &record);
+}
+
 QEMU_DISABLE_CFI
 void qemu_plugin_vcpu_mem_cb(CPUState *cpu, uint64_t vaddr,
                              uint64_t value_low,
@@ -736,8 +940,23 @@ void qemu_plugin_vcpu_mem_cb(CPUState *cpu, uint64_t vaddr,
             &g_array_index(arr, struct qemu_plugin_dyn_cb, i);
 
         switch (cb->type) {
+        case PLUGIN_CB_MEM_TRACE:
+            if (rw & cb->trace.rw) {
+                qemu_plugin_meminfo_t info = atomic ?
+                    make_plugin_atomic_meminfo(oi, rw) :
+                    make_plugin_meminfo(oi, rw);
+                if (atomic && !atomic_success) {
+                    info |= QEMU_PLUGIN_MEMINFO_ATOMIC_FAILED;
+                }
+                qemu_plugin_trace_mem_record(cpu->cpu_index, info, vaddr,
+                                             cb->trace.buffer, cb->trace.pc);
+            }
+            break;
         case PLUGIN_CB_MEM_REGULAR:
-            if (rw & cb->regular.rw) {
+        case PLUGIN_CB_MEM_COND:
+            if ((rw & cb->regular.rw) &&
+                (cb->type != PLUGIN_CB_MEM_COND ||
+                 plugin_mem_cond_matches(&cb->regular, cpu->cpu_index))) {
                 qemu_plugin_set_cb_flags(cpu,
                     tcg_call_to_qemu_plugin_cb_flags(cb->regular.info->flags));
 
@@ -847,11 +1066,395 @@ void qemu_plugin_register_user_task_cb(qemu_plugin_id_t id,
     plugin_register_cb_udata(id, QEMU_PLUGIN_EV_USER_TASK, cb, userdata);
 }
 
+void qemu_plugin_register_user_signal_cb(qemu_plugin_id_t id,
+                                         qemu_plugin_user_signal_cb_t cb,
+                                         void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_USER_SIGNAL, cb, userdata);
+}
+
+QEMU_DISABLE_CFI
+void qemu_plugin_user_signal_notify(int signo, int code, bool has_fault_addr,
+                                    uint64_t fault_addr)
+{
+    struct qemu_plugin_user_signal_event event = {
+        .struct_size = sizeof(event),
+        .signo = signo,
+        .code = code,
+        .has_fault_addr = has_fault_addr,
+        .fault_addr = fault_addr,
+    };
+    struct qemu_plugin_cb *cb, *next;
+
+    if (!test_bit(QEMU_PLUGIN_EV_USER_SIGNAL, plugin.mask) ||
+        !qemu_plugin_get_exec_context(&event.context,
+                                      sizeof(event.context)) ||
+        event.context.system_emulation) {
+        return;
+    }
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_USER_SIGNAL],
+                           entry, next) {
+        cb->f.user_signal(&event, cb->udata);
+    }
+}
+
 void qemu_plugin_register_user_mapping_cb(qemu_plugin_id_t id,
                                            qemu_plugin_user_mapping_cb_t cb,
                                            void *userdata)
 {
     plugin_register_cb_udata(id, QEMU_PLUGIN_EV_USER_MAPPING, cb, userdata);
+}
+
+void qemu_plugin_register_user_image_cb(qemu_plugin_id_t id,
+                                        qemu_plugin_user_image_cb_t cb,
+                                        void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_USER_IMAGE, cb, userdata);
+}
+
+/* Linux PROT_EXEC is 4 on every Linux target supported by linux-user. */
+#define PLUGIN_LINUX_PROT_EXEC 4U
+#define PLUGIN_LINUX_MREMAP_DONTUNMAP 4U
+
+typedef struct {
+    uint64_t id, pid, dev, ino, last_exec_addr;
+    size_t exec_segments, mappings;
+    bool was_active;
+    char *path;
+} PluginImage;
+
+typedef struct {
+    uint64_t pid, start, len, offset;
+    uint32_t prot;
+    PluginImage *image;
+} PluginImageSegment;
+
+static GPtrArray *plugin_images;
+static GPtrArray *plugin_image_segments;
+static uint64_t plugin_next_image_id = 1;
+
+static void plugin_image_free(gpointer data)
+{
+    PluginImage *image = data;
+    g_free(image->path);
+    g_free(image);
+}
+
+static void plugin_images_init(void)
+{
+    if (!plugin_images) {
+        plugin_images = g_ptr_array_new_with_free_func(plugin_image_free);
+        plugin_image_segments = g_ptr_array_new_with_free_func(g_free);
+    }
+}
+
+static uint64_t plugin_range_end(uint64_t start, uint64_t len)
+{
+    return len > UINT64_MAX - start ? UINT64_MAX : start + len;
+}
+
+static PluginImageSegment *plugin_image_segment_copy(PluginImageSegment *src)
+{
+    return g_memdup2(src, sizeof(*src));
+}
+
+static void plugin_image_remove_range(uint64_t pid, uint64_t start,
+                                      uint64_t len)
+{
+    uint64_t end = plugin_range_end(start, len);
+
+    for (guint i = 0; i < plugin_image_segments->len;) {
+        PluginImageSegment *seg = g_ptr_array_index(plugin_image_segments, i);
+        uint64_t seg_end = plugin_range_end(seg->start, seg->len);
+
+        if (seg->pid != pid || seg_end <= start || end <= seg->start) {
+            i++;
+            continue;
+        }
+        if (seg->start < start && end < seg_end) {
+            PluginImageSegment *right = plugin_image_segment_copy(seg);
+            right->start = end;
+            right->offset += end - seg->start;
+            right->len = seg_end - end;
+            seg->len = start - seg->start;
+            g_ptr_array_add(plugin_image_segments, right);
+            i++;
+        } else if (seg->start < start) {
+            seg->len = start - seg->start;
+            i++;
+        } else if (end < seg_end) {
+            seg->offset += end - seg->start;
+            seg->start = end;
+            seg->len = seg_end - end;
+            i++;
+        } else {
+            g_ptr_array_remove_index_fast(plugin_image_segments, i);
+        }
+    }
+}
+
+static void plugin_image_protect_range(uint64_t pid, uint64_t start,
+                                       uint64_t len, uint32_t prot)
+{
+    uint64_t end = plugin_range_end(start, len);
+    guint original_count = plugin_image_segments->len;
+
+    for (guint i = 0; i < original_count; i++) {
+        PluginImageSegment *seg = g_ptr_array_index(plugin_image_segments, i);
+        uint64_t seg_end = plugin_range_end(seg->start, seg->len);
+        uint64_t lo = MAX(start, seg->start);
+        uint64_t hi = MIN(end, seg_end);
+        uint64_t old_start = seg->start;
+
+        if (seg->pid != pid || lo >= hi) {
+            continue;
+        }
+        if (old_start < lo) {
+            PluginImageSegment *left = plugin_image_segment_copy(seg);
+            left->len = lo - old_start;
+            g_ptr_array_add(plugin_image_segments, left);
+        }
+        if (hi < seg_end) {
+            PluginImageSegment *right = plugin_image_segment_copy(seg);
+            right->start = hi;
+            right->offset += hi - old_start;
+            right->len = seg_end - hi;
+            g_ptr_array_add(plugin_image_segments, right);
+        }
+        seg->offset += lo - old_start;
+        seg->start = lo;
+        seg->len = hi - lo;
+        seg->prot = prot;
+    }
+}
+
+static PluginImage *plugin_image_find_or_create(
+    const struct qemu_plugin_user_mapping_event *event)
+{
+    uint64_t pid = event->context.pid;
+
+    for (guint i = 0; i < plugin_image_segments->len; i++) {
+        PluginImageSegment *seg = g_ptr_array_index(plugin_image_segments, i);
+        PluginImage *image = seg->image;
+
+        if (seg->pid == pid && image->dev == event->file_dev &&
+            image->ino == event->file_ino) {
+            return image;
+        }
+    }
+    PluginImage *image = g_new0(PluginImage, 1);
+    image->id = plugin_next_image_id++;
+    image->pid = pid;
+    image->dev = event->file_dev;
+    image->ino = event->file_ino;
+    image->path = g_strdup(event->path);
+    g_ptr_array_add(plugin_images, image);
+    return image;
+}
+
+QEMU_DISABLE_CFI
+static void plugin_image_emit(PluginImage *image,
+                              const struct qemu_plugin_exec_context *context,
+                              enum qemu_plugin_user_image_event_type type)
+{
+    struct qemu_plugin_user_image_event event = {
+        .struct_size = sizeof(event),
+        .type = type,
+        .context = *context,
+        .image_id = image->id,
+        .file_dev = image->dev,
+        .file_ino = image->ino,
+        .executable_addr = image->last_exec_addr,
+        .path = image->path,
+    };
+    struct qemu_plugin_cb *cb, *next;
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_USER_IMAGE],
+                           entry, next) {
+        cb->f.user_image(&event, cb->udata);
+    }
+}
+
+static void plugin_image_update(
+    const struct qemu_plugin_user_mapping_event *event)
+{
+    uint64_t pid = event->context.pid;
+    GPtrArray *moved = NULL;
+
+    QEMU_LOCK_GUARD(&plugin.lock);
+    plugin_images_init();
+    for (guint i = 0; i < plugin_images->len; i++) {
+        PluginImage *image = g_ptr_array_index(plugin_images, i);
+        image->was_active = image->exec_segments != 0;
+        image->exec_segments = 0;
+        image->mappings = 0;
+    }
+
+    switch (event->type) {
+    case QEMU_PLUGIN_USER_MAP:
+        plugin_image_remove_range(pid, event->addr, event->len);
+        if (event->file_ino && event->path) {
+            PluginImageSegment *seg = g_new0(PluginImageSegment, 1);
+            seg->image = plugin_image_find_or_create(event);
+            seg->pid = pid;
+            seg->start = event->addr;
+            seg->len = event->len;
+            seg->offset = event->offset;
+            seg->prot = event->prot;
+            g_ptr_array_add(plugin_image_segments, seg);
+        }
+        break;
+    case QEMU_PLUGIN_USER_UNMAP:
+        plugin_image_remove_range(pid, event->addr, event->len);
+        break;
+    case QEMU_PLUGIN_USER_PROTECT:
+        plugin_image_protect_range(pid, event->addr, event->len, event->prot);
+        break;
+    case QEMU_PLUGIN_USER_REMAP:
+        moved = g_ptr_array_new_with_free_func(g_free);
+        for (guint i = 0; i < plugin_image_segments->len; i++) {
+            PluginImageSegment *seg =
+                g_ptr_array_index(plugin_image_segments, i);
+            uint64_t lo = MAX(seg->start, event->old_addr);
+            uint64_t hi = MIN(plugin_range_end(seg->start, seg->len),
+                              plugin_range_end(event->old_addr,
+                                               event->old_len));
+            if (seg->pid == pid && lo < hi) {
+                uint64_t displacement = lo - event->old_addr;
+                if (displacement >= event->len) {
+                    continue;
+                }
+                PluginImageSegment *copy = plugin_image_segment_copy(seg);
+                copy->offset += lo - seg->start;
+                copy->start = event->addr + displacement;
+                copy->len = MIN(hi - lo, event->len - displacement);
+                g_ptr_array_add(moved, copy);
+            }
+        }
+        if (!(event->flags & PLUGIN_LINUX_MREMAP_DONTUNMAP)) {
+            plugin_image_remove_range(pid, event->old_addr, event->old_len);
+        }
+        plugin_image_remove_range(pid, event->addr, event->len);
+        for (guint i = 0; i < moved->len; i++) {
+            g_ptr_array_add(plugin_image_segments,
+                            g_ptr_array_index(moved, i));
+        }
+        g_ptr_array_set_free_func(moved, NULL);
+        g_ptr_array_free(moved, true);
+        break;
+    }
+
+    for (guint i = 0; i < plugin_image_segments->len; i++) {
+        PluginImageSegment *seg = g_ptr_array_index(plugin_image_segments, i);
+        PluginImage *image = seg->image;
+        image->mappings++;
+        if (seg->prot & PLUGIN_LINUX_PROT_EXEC) {
+            image->exec_segments++;
+            image->last_exec_addr = seg->start;
+        }
+    }
+    for (guint i = 0; i < plugin_images->len;) {
+        PluginImage *image = g_ptr_array_index(plugin_images, i);
+        bool is_active = image->exec_segments != 0;
+
+        if (image->was_active != is_active) {
+            plugin_image_emit(image, &event->context,
+                              is_active ? QEMU_PLUGIN_USER_IMAGE_LOAD :
+                                          QEMU_PLUGIN_USER_IMAGE_UNLOAD);
+        }
+        if (!image->mappings) {
+            g_ptr_array_remove_index_fast(plugin_images, i);
+        } else {
+            i++;
+        }
+    }
+}
+
+static void plugin_image_task_update(
+    const struct qemu_plugin_user_task_event *event)
+{
+    uint64_t pid = event->context.pid;
+
+    QEMU_LOCK_GUARD(&plugin.lock);
+    if (!plugin_images) {
+        return;
+    }
+    if (event->type == QEMU_PLUGIN_USER_FORK_CHILD) {
+        for (guint i = 0; i < plugin_image_segments->len; i++) {
+            PluginImageSegment *seg =
+                g_ptr_array_index(plugin_image_segments, i);
+            if (seg->pid == event->related_pid) {
+                seg->pid = pid;
+            }
+        }
+        for (guint i = 0; i < plugin_images->len; i++) {
+            PluginImage *image = g_ptr_array_index(plugin_images, i);
+            if (image->pid == event->related_pid) {
+                image->pid = pid;
+                if (image->exec_segments) {
+                    plugin_image_emit(image, &event->context,
+                                      QEMU_PLUGIN_USER_IMAGE_LOAD);
+                }
+            }
+        }
+    } else if (event->type == QEMU_PLUGIN_USER_PROCESS_EXIT) {
+        for (guint i = 0; i < plugin_images->len; i++) {
+            PluginImage *image = g_ptr_array_index(plugin_images, i);
+            if (image->pid == pid && image->exec_segments) {
+                plugin_image_emit(image, &event->context,
+                                  QEMU_PLUGIN_USER_IMAGE_UNLOAD);
+            }
+        }
+        for (guint i = 0; i < plugin_image_segments->len;) {
+            PluginImageSegment *seg =
+                g_ptr_array_index(plugin_image_segments, i);
+            if (seg->pid == pid) {
+                g_ptr_array_remove_index_fast(plugin_image_segments, i);
+            } else {
+                i++;
+            }
+        }
+        for (guint i = 0; i < plugin_images->len;) {
+            PluginImage *image = g_ptr_array_index(plugin_images, i);
+            if (image->pid == pid) {
+                g_ptr_array_remove_index_fast(plugin_images, i);
+            } else {
+                i++;
+            }
+        }
+    }
+}
+
+bool qemu_plugin_user_image_lookup(uint64_t vaddr, uint64_t *image_id,
+                                   uint64_t *file_offset, char **path)
+{
+    struct qemu_plugin_exec_context context;
+
+    if (!qemu_plugin_get_exec_context(&context, sizeof(context)) ||
+        context.system_emulation) {
+        return false;
+    }
+    QEMU_LOCK_GUARD(&plugin.lock);
+    if (!plugin_image_segments) {
+        return false;
+    }
+    for (guint i = 0; i < plugin_image_segments->len; i++) {
+        PluginImageSegment *seg = g_ptr_array_index(plugin_image_segments, i);
+        if (seg->pid == context.pid && vaddr >= seg->start &&
+            vaddr - seg->start < seg->len) {
+            if (image_id) {
+                *image_id = seg->image->id;
+            }
+            if (file_offset) {
+                *file_offset = seg->offset + vaddr - seg->start;
+            }
+            if (path) {
+                *path = g_strdup(seg->image->path);
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Both notifications are synchronous; event-owned strings expire on return. */
@@ -867,11 +1470,16 @@ void qemu_plugin_user_task_notify(enum qemu_plugin_user_task_event_type type,
     };
     struct qemu_plugin_cb *cb, *next;
 
-    if (!test_bit(QEMU_PLUGIN_EV_USER_TASK, plugin.mask) ||
+    if ((!test_bit(QEMU_PLUGIN_EV_USER_TASK, plugin.mask) &&
+         !test_bit(QEMU_PLUGIN_EV_USER_IMAGE, plugin.mask)) ||
         !qemu_plugin_get_exec_context(&event.context,
                                       sizeof(event.context)) ||
         event.context.system_emulation) {
         return;
+    }
+
+    if (test_bit(QEMU_PLUGIN_EV_USER_IMAGE, plugin.mask)) {
+        plugin_image_task_update(&event);
     }
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_USER_TASK],
@@ -899,9 +1507,13 @@ void qemu_plugin_user_mapping_notify(
     };
     struct qemu_plugin_cb *cb, *next;
     g_autofree char *path = NULL;
+    bool want_mapping = test_bit(QEMU_PLUGIN_EV_USER_MAPPING, plugin.mask);
+    bool want_image = test_bit(QEMU_PLUGIN_EV_USER_IMAGE, plugin.mask);
 
-    if (!test_bit(QEMU_PLUGIN_EV_USER_MAPPING, plugin.mask) ||
-        !qemu_plugin_get_exec_context(&event.context,
+    if (!want_mapping && !want_image) {
+        return;
+    }
+    if (!qemu_plugin_get_exec_context(&event.context,
                                       sizeof(event.context)) ||
         event.context.system_emulation) {
         return;
@@ -917,6 +1529,10 @@ void qemu_plugin_user_mapping_notify(
         }
         path = g_file_read_link(link, NULL);
         event.path = path;
+    }
+
+    if (want_image) {
+        plugin_image_update(&event);
     }
 
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_USER_MAPPING],
@@ -975,6 +1591,124 @@ void plugin_scoreboard_free(struct qemu_plugin_scoreboard *score)
 
     g_array_free(score->data, TRUE);
     g_free(score);
+}
+
+struct qemu_plugin_vcpu_storage {
+    qemu_plugin_id_t owner;
+    struct qemu_plugin_scoreboard *score;
+    size_t size, data_offset;
+    qemu_plugin_vcpu_storage_dtor_t dtor;
+    void *userdata;
+};
+
+static GPtrArray *plugin_vcpu_storages;
+
+static uint8_t *plugin_storage_slot(struct qemu_plugin_vcpu_storage *storage,
+                                    unsigned int vcpu_index)
+{
+    return qemu_plugin_scoreboard_find(storage->score, vcpu_index);
+}
+
+static void plugin_storage_destroy(struct qemu_plugin_vcpu_storage *storage)
+{
+    for (unsigned int i = 0; i < plugin.num_vcpus; i++) {
+        uint8_t *slot = plugin_storage_slot(storage, i);
+        if (slot[0] && storage->dtor) {
+            storage->dtor(i, slot + storage->data_offset,
+                          storage->userdata);
+        }
+    }
+    plugin_scoreboard_free(storage->score);
+    g_free(storage);
+}
+
+struct qemu_plugin_vcpu_storage *qemu_plugin_vcpu_storage_new(
+    qemu_plugin_id_t id, size_t size, qemu_plugin_vcpu_storage_dtor_t dtor,
+    void *userdata)
+{
+    struct qemu_plugin_vcpu_storage *storage;
+    size_t align = __alignof__(max_align_t);
+    size_t offset = QEMU_ALIGN_UP(1, align);
+
+    if (!size || size > SIZE_MAX - offset) {
+        return NULL;
+    }
+    QEMU_LOCK_GUARD(&plugin.lock);
+    plugin_id_to_ctx_locked(id);
+    if (!plugin_vcpu_storages) {
+        plugin_vcpu_storages = g_ptr_array_new();
+    }
+    storage = g_new0(struct qemu_plugin_vcpu_storage, 1);
+    storage->owner = id;
+    storage->size = size;
+    storage->data_offset = offset;
+    storage->dtor = dtor;
+    storage->userdata = userdata;
+    storage->score = plugin_scoreboard_new(QEMU_ALIGN_UP(offset + size, align));
+    g_ptr_array_add(plugin_vcpu_storages, storage);
+    return storage;
+}
+
+void *qemu_plugin_vcpu_storage_get(struct qemu_plugin_vcpu_storage *storage,
+                                   unsigned int vcpu_index)
+{
+    uint8_t *slot;
+
+    if (!storage || vcpu_index >= qemu_plugin_num_vcpus()) {
+        return NULL;
+    }
+    slot = plugin_storage_slot(storage, vcpu_index);
+    slot[0] = 1;
+    return slot + storage->data_offset;
+}
+
+void qemu_plugin_vcpu_storage_free(struct qemu_plugin_vcpu_storage *storage)
+{
+    if (!storage) {
+        return;
+    }
+    QEMU_LOCK_GUARD(&plugin.lock);
+    g_assert(plugin_vcpu_storages);
+    g_assert(g_ptr_array_remove_fast(plugin_vcpu_storages, storage));
+    plugin_storage_destroy(storage);
+}
+
+void plugin_vcpu_storage_exit(unsigned int vcpu_index)
+{
+    QEMU_LOCK_GUARD(&plugin.lock);
+    if (!plugin_vcpu_storages) {
+        return;
+    }
+    for (guint i = 0; i < plugin_vcpu_storages->len; i++) {
+        struct qemu_plugin_vcpu_storage *storage =
+            g_ptr_array_index(plugin_vcpu_storages, i);
+        uint8_t *slot = plugin_storage_slot(storage, vcpu_index);
+        if (slot[0]) {
+            if (storage->dtor) {
+                storage->dtor(vcpu_index, slot + storage->data_offset,
+                              storage->userdata);
+            }
+            memset(slot, 0, storage->data_offset + storage->size);
+        }
+    }
+}
+
+void plugin_vcpu_storage_cleanup(qemu_plugin_id_t id)
+{
+    QEMU_LOCK_GUARD(&plugin.lock);
+    if (!plugin_vcpu_storages) {
+        return;
+    }
+    for (guint i = 0; i < plugin_vcpu_storages->len;) {
+        struct qemu_plugin_vcpu_storage *storage =
+            g_ptr_array_index(plugin_vcpu_storages, i);
+        if (storage->owner == id) {
+            g_ptr_array_remove_index_fast(plugin_vcpu_storages, i);
+            plugin_storage_destroy(storage);
+        } else {
+            i++;
+        }
+    }
 }
 
 enum qemu_plugin_cb_flags tcg_call_to_qemu_plugin_cb_flags(int flags)

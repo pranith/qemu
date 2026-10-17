@@ -141,6 +141,16 @@ void qemu_plugin_register_vcpu_insn_exec_cb(struct qemu_plugin_insn *insn,
     }
 }
 
+void qemu_plugin_register_vcpu_insn_after_cb(struct qemu_plugin_insn *insn,
+                                             qemu_plugin_vcpu_udata_cb_t cb,
+                                             enum qemu_plugin_cb_flags flags,
+                                             void *udata)
+{
+    if (!tb_is_mem_only()) {
+        plugin_register_dyn_cb__udata(&insn->after_cbs, cb, flags, udata);
+    }
+}
+
 void qemu_plugin_register_vcpu_insn_exec_cond_cb(
     struct qemu_plugin_insn *insn,
     qemu_plugin_vcpu_udata_cb_t cb,
@@ -186,6 +196,23 @@ void qemu_plugin_register_vcpu_mem_cb(struct qemu_plugin_insn *insn,
     plugin_register_vcpu_mem_cb(&insn->mem_cbs, cb, flags, rw, udata);
 }
 
+void qemu_plugin_register_vcpu_mem_cond_cb(
+    struct qemu_plugin_insn *insn, qemu_plugin_vcpu_mem_cb_t cb,
+    enum qemu_plugin_cb_flags flags, enum qemu_plugin_mem_rw rw,
+    enum qemu_plugin_cond cond, qemu_plugin_u64 entry, uint64_t imm,
+    void *udata)
+{
+    if (cond == QEMU_PLUGIN_COND_NEVER) {
+        return;
+    }
+    if (cond == QEMU_PLUGIN_COND_ALWAYS) {
+        qemu_plugin_register_vcpu_mem_cb(insn, cb, flags, rw, udata);
+        return;
+    }
+    plugin_register_vcpu_mem_cond_cb(&insn->mem_cbs, cb, flags, rw,
+                                     cond, entry, imm, udata);
+}
+
 void qemu_plugin_register_vcpu_mem_inline_per_vcpu(
     struct qemu_plugin_insn *insn,
     enum qemu_plugin_mem_rw rw,
@@ -201,6 +228,20 @@ void qemu_plugin_register_vcpu_tb_trans_cb(qemu_plugin_id_t id,
                                            void *userdata)
 {
     plugin_register_cb_udata(id, QEMU_PLUGIN_EV_VCPU_TB_TRANS, cb, userdata);
+}
+
+void qemu_plugin_register_vcpu_tb_edge_cb(qemu_plugin_id_t id,
+                                          qemu_plugin_vcpu_tb_edge_cb_t cb,
+                                          void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_VCPU_TB_EDGE, cb, userdata);
+}
+
+void qemu_plugin_register_routine_cb(qemu_plugin_id_t id,
+                                     qemu_plugin_routine_cb_t cb,
+                                     void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_VCPU_ROUTINE, cb, userdata);
 }
 
 void qemu_plugin_register_vcpu_syscall_cb(qemu_plugin_id_t id,
@@ -281,6 +322,11 @@ size_t qemu_plugin_insn_data(const struct qemu_plugin_insn *insn,
 size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn)
 {
     return insn->len;
+}
+
+uint32_t qemu_plugin_insn_get_properties(const struct qemu_plugin_insn *insn)
+{
+    return insn->properties;
 }
 
 uint64_t qemu_plugin_insn_vaddr(const struct qemu_plugin_insn *insn)
@@ -690,6 +736,131 @@ void *qemu_plugin_scoreboard_find(struct qemu_plugin_scoreboard *score,
     /* we can't use g_array_index since entry size is not statically known */
     char *base_ptr = score->data->data;
     return base_ptr + vcpu_index * g_array_get_element_size(score->data);
+}
+
+struct trace_buffer_vcpu {
+    uint8_t *records;
+    size_t used;
+    bool in_callback;
+};
+
+struct qemu_plugin_trace_buffer {
+    struct qemu_plugin_scoreboard *score;
+    size_t record_size;
+    size_t capacity;
+    qemu_plugin_trace_buffer_cb_t cb;
+    void *userdata;
+};
+
+struct qemu_plugin_trace_buffer *qemu_plugin_trace_buffer_new(
+    size_t record_size, size_t capacity, qemu_plugin_trace_buffer_cb_t cb,
+    void *userdata)
+{
+    struct qemu_plugin_trace_buffer *buffer;
+
+    if (!record_size || !capacity || capacity > SIZE_MAX / record_size || !cb) {
+        return NULL;
+    }
+    buffer = g_new0(struct qemu_plugin_trace_buffer, 1);
+    buffer->score = qemu_plugin_scoreboard_new(
+        sizeof(struct trace_buffer_vcpu));
+    buffer->record_size = record_size;
+    buffer->capacity = capacity;
+    buffer->cb = cb;
+    buffer->userdata = userdata;
+    return buffer;
+}
+
+void qemu_plugin_trace_buffer_flush(struct qemu_plugin_trace_buffer *buffer,
+                                    unsigned int vcpu_index)
+{
+    struct trace_buffer_vcpu *vcpu;
+    size_t count;
+
+    if (!buffer || vcpu_index >= qemu_plugin_num_vcpus()) {
+        return;
+    }
+    vcpu = qemu_plugin_scoreboard_find(buffer->score, vcpu_index);
+    if (!vcpu->used || vcpu->in_callback) {
+        return;
+    }
+    count = vcpu->used;
+    vcpu->used = 0;
+    vcpu->in_callback = true;
+    buffer->cb(vcpu_index, vcpu->records, count, buffer->userdata);
+    vcpu->in_callback = false;
+}
+
+bool qemu_plugin_trace_buffer_append(struct qemu_plugin_trace_buffer *buffer,
+                                     unsigned int vcpu_index,
+                                     const void *record)
+{
+    struct trace_buffer_vcpu *vcpu;
+
+    if (!buffer || !record || vcpu_index >= qemu_plugin_num_vcpus()) {
+        return false;
+    }
+    vcpu = qemu_plugin_scoreboard_find(buffer->score, vcpu_index);
+    if (vcpu->in_callback) {
+        return false;
+    }
+    if (!vcpu->records) {
+        vcpu->records = g_malloc(buffer->record_size * buffer->capacity);
+    }
+    memcpy(vcpu->records + buffer->record_size * vcpu->used,
+           record, buffer->record_size);
+    if (++vcpu->used == buffer->capacity) {
+        qemu_plugin_trace_buffer_flush(buffer, vcpu_index);
+    }
+    return true;
+}
+
+void qemu_plugin_trace_buffer_free(struct qemu_plugin_trace_buffer *buffer)
+{
+    if (!buffer) {
+        return;
+    }
+    for (unsigned int i = 0; i < qemu_plugin_num_vcpus(); i++) {
+        struct trace_buffer_vcpu *vcpu =
+            qemu_plugin_scoreboard_find(buffer->score, i);
+
+        g_assert(vcpu->used == 0 && !vcpu->in_callback);
+        g_free(vcpu->records);
+    }
+    qemu_plugin_scoreboard_free(buffer->score);
+    g_free(buffer);
+}
+
+bool qemu_plugin_register_vcpu_insn_trace(struct qemu_plugin_insn *insn,
+    struct qemu_plugin_trace_buffer *buffer, enum qemu_plugin_trace_kind kind)
+{
+    if (!buffer || buffer->record_size !=
+                   sizeof(struct qemu_plugin_trace_record) ||
+        (kind != QEMU_PLUGIN_TRACE_INSN_BEFORE &&
+         kind != QEMU_PLUGIN_TRACE_INSN_AFTER)) {
+        return false;
+    }
+    if (tb_is_mem_only()) {
+        return true;
+    }
+    plugin_register_trace_cb(kind == QEMU_PLUGIN_TRACE_INSN_BEFORE ?
+                             &insn->insn_cbs : &insn->after_cbs,
+                             buffer, insn->vaddr, kind, 0);
+    return true;
+}
+
+bool qemu_plugin_register_vcpu_mem_trace(struct qemu_plugin_insn *insn,
+    struct qemu_plugin_trace_buffer *buffer, enum qemu_plugin_mem_rw rw)
+{
+    if (!buffer || buffer->record_size !=
+                   sizeof(struct qemu_plugin_trace_record) ||
+        (rw != QEMU_PLUGIN_MEM_R && rw != QEMU_PLUGIN_MEM_W &&
+         rw != QEMU_PLUGIN_MEM_RW)) {
+        return false;
+    }
+    plugin_register_trace_cb(&insn->mem_cbs, buffer, insn->vaddr,
+                             QEMU_PLUGIN_TRACE_MEMORY, rw);
+    return true;
 }
 
 static uint64_t *plugin_u64_address(qemu_plugin_u64 entry,

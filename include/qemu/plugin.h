@@ -74,6 +74,11 @@ union qemu_plugin_cb_sig {
     qemu_plugin_vcpu_syscall_filter_cb_t vcpu_syscall_filter;
     qemu_plugin_user_task_cb_t           user_task;
     qemu_plugin_user_mapping_cb_t        user_mapping;
+    qemu_plugin_user_image_cb_t          user_image;
+    qemu_plugin_vcpu_tb_edge_cb_t        tb_edge;
+    qemu_plugin_routine_cb_t             routine;
+    qemu_plugin_user_signal_cb_t         user_signal;
+    qemu_plugin_exception_cb_t           exception;
     void *generic;
 };
 
@@ -81,6 +86,9 @@ enum plugin_dyn_cb_type {
     PLUGIN_CB_REGULAR,
     PLUGIN_CB_COND,
     PLUGIN_CB_MEM_REGULAR,
+    PLUGIN_CB_MEM_COND,
+    PLUGIN_CB_TRACE_INSN,
+    PLUGIN_CB_MEM_TRACE,
     PLUGIN_CB_INLINE_ADD_U64,
     PLUGIN_CB_INLINE_STORE_U64,
 };
@@ -90,11 +98,21 @@ struct qemu_plugin_regular_cb {
     TCGHelperInfo *info;
     void *userp;
     enum qemu_plugin_mem_rw rw;
+    enum qemu_plugin_cond cond;
+    qemu_plugin_u64 entry;
+    uint64_t imm;
 };
 
 struct qemu_plugin_inline_cb {
     qemu_plugin_u64 entry;
     uint64_t imm;
+    enum qemu_plugin_mem_rw rw;
+};
+
+struct qemu_plugin_trace_cb {
+    struct qemu_plugin_trace_buffer *buffer;
+    uint64_t pc;
+    enum qemu_plugin_trace_kind kind;
     enum qemu_plugin_mem_rw rw;
 };
 
@@ -118,6 +136,7 @@ struct qemu_plugin_dyn_cb {
         struct qemu_plugin_regular_cb regular;
         struct qemu_plugin_conditional_cb cond;
         struct qemu_plugin_inline_cb inline_insn;
+        struct qemu_plugin_trace_cb trace;
     };
 };
 
@@ -125,8 +144,10 @@ struct qemu_plugin_dyn_cb {
 struct qemu_plugin_insn {
     uint64_t vaddr;
     GArray *insn_cbs;
+    GArray *after_cbs;
     GArray *mem_cbs;
     uint8_t len;
+    uint32_t properties;
     bool calls_helpers;
 
     /* if set, the instruction calls helpers that might access guest memory */
@@ -156,6 +177,8 @@ struct qemu_plugin_tb {
  */
 struct CPUPluginState {
     DECLARE_BITMAP(event_mask, QEMU_PLUGIN_EV_MAX);
+    bool edge_pending;
+    struct qemu_plugin_tb_edge edge;
 };
 
 /**
@@ -190,6 +213,24 @@ void qemu_plugin_vcpu_mem_cb(CPUState *cpu, uint64_t vaddr,
                              uint64_t value_high,
                              MemOpIdx oi, enum qemu_plugin_mem_rw rw,
                              bool atomic, bool atomic_success);
+
+void qemu_plugin_vcpu_mem_cond_wrapper(unsigned int vcpu_index,
+                                       qemu_plugin_meminfo_t info,
+                                       uint64_t vaddr, void *userdata);
+
+void qemu_plugin_trace_insn_record(unsigned int vcpu_index,
+                                   struct qemu_plugin_trace_buffer *buffer,
+                                   uint64_t pc, uint32_t kind);
+void qemu_plugin_trace_mem_record(unsigned int vcpu_index,
+                                  qemu_plugin_meminfo_t info,
+                                  uint64_t vaddr,
+                                  struct qemu_plugin_trace_buffer *buffer,
+                                  uint64_t pc);
+
+void qemu_plugin_vcpu_tb_edge_exit(unsigned int vcpu_index, uint64_t from_pc,
+                                   uint64_t sequential_pc,
+                                   uint32_t from_properties);
+void qemu_plugin_vcpu_tb_edge_entry(unsigned int vcpu_index, uint64_t to_pc);
 
 void qemu_plugin_flush_cb(void);
 
@@ -231,6 +272,8 @@ void qemu_plugin_user_postfork(bool is_child);
 
 void qemu_plugin_user_task_notify(enum qemu_plugin_user_task_event_type type,
                                   uint64_t related_pid, const char *path);
+void qemu_plugin_user_signal_notify(int signo, int code, bool has_fault_addr,
+                                    uint64_t fault_addr);
 void qemu_plugin_user_mapping_notify(
     enum qemu_plugin_user_mapping_event_type type,
     uint64_t addr, uint64_t len, uint64_t old_addr, uint64_t old_len,

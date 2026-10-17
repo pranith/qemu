@@ -172,6 +172,8 @@ plugin_gen_mem_callbacks(TCGv_i64 copy_addr, TCGTemp *orig_addr, MemOpIdx oi,
 {
     qemu_plugin_meminfo_t info = make_plugin_meminfo(oi, rw);
 
+    tcg_ctx->plugin_insn->properties |= QEMU_PLUGIN_INSN_TRANSLATED_MEMORY;
+
     if (tcg_ctx->addr_type == TCG_TYPE_I32) {
         if (!copy_addr) {
             copy_addr = tcg_temp_ebb_new_i64();
