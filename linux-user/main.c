@@ -180,6 +180,9 @@ void fork_end(pid_t pid)
      * both child and parent.
      */
     end_exclusive();
+    qemu_plugin_user_task_notify(child ? QEMU_PLUGIN_USER_FORK_CHILD :
+                                 QEMU_PLUGIN_USER_FORK_PARENT,
+                                 child ? getppid() : pid, NULL);
 }
 
 __thread CPUState *thread_cpu;

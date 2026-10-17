@@ -29,6 +29,7 @@
 #include "user-mmap.h"
 #include "target_mman.h"
 #include "qemu/interval-tree.h"
+#include "qemu/plugin.h"
 
 #ifdef TARGET_ARM
 #include "target/arm/cpu-features.h"
@@ -274,6 +275,11 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
     ret = 0;
 
  error:
+    if (ret == 0) {
+        qemu_plugin_user_mapping_notify(QEMU_PLUGIN_USER_PROTECT,
+                                        start, len, 0, 0, target_prot,
+                                        0, -1, 0);
+    }
     mmap_unlock();
     return ret;
 }
@@ -1007,6 +1013,12 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     ret = target_mmap__locked(start, len, target_prot, flags,
                               page_flags, fd, offset);
 
+    if (ret != -1) {
+        qemu_plugin_user_mapping_notify(QEMU_PLUGIN_USER_MAP,
+                                        ret, len, 0, 0, target_prot,
+                                        flags, fd, offset);
+    }
+
     mmap_unlock();
 
     /*
@@ -1101,6 +1113,8 @@ int target_munmap(abi_ulong start, abi_ulong len)
     if (likely(ret == 0)) {
         page_set_flags(start, start + len - 1, 0, PAGE_VALID);
         shm_region_rm_complete(start, start + len - 1);
+        qemu_plugin_user_mapping_notify(QEMU_PLUGIN_USER_UNMAP,
+                                        start, len, 0, 0, 0, 0, -1, 0);
     }
     mmap_unlock();
 
@@ -1169,6 +1183,9 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         page_set_flags(new_addr, new_addr + new_size - 1,
                        prot | PAGE_VALID, PAGE_VALID);
         shm_region_rm_complete(new_addr, new_addr + new_size - 1);
+        qemu_plugin_user_mapping_notify(QEMU_PLUGIN_USER_REMAP,
+                                        new_addr, new_size, old_addr,
+                                        old_size, 0, flags, -1, 0);
         mmap_unlock();
         return new_addr;
     }
@@ -1251,6 +1268,11 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         page_set_flags(new_addr, new_addr + new_size - 1,
                        prot | PAGE_VALID, PAGE_VALID);
         shm_region_rm_complete(new_addr, new_addr + new_size - 1);
+    }
+    if (new_addr != -1) {
+        qemu_plugin_user_mapping_notify(QEMU_PLUGIN_USER_REMAP,
+                                        new_addr, new_size, old_addr,
+                                        old_size, 0, flags, -1, 0);
     }
     mmap_unlock();
     return new_addr;

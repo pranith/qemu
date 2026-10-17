@@ -270,6 +270,7 @@ static void qemu_plugin_vcpu_init__async(CPUState *cpu, run_on_cpu_data unused)
 
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_RW_REGS);
     plugin_vcpu_cb__udata(cpu, QEMU_PLUGIN_EV_VCPU_INIT);
+    qemu_plugin_user_task_notify(QEMU_PLUGIN_USER_THREAD_START, 0, NULL);
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_NO_REGS);
 }
 
@@ -284,6 +285,7 @@ void qemu_plugin_vcpu_exit_hook(CPUState *cpu)
     bool success;
 
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_RW_REGS);
+    qemu_plugin_user_task_notify(QEMU_PLUGIN_USER_THREAD_EXIT, 0, NULL);
     plugin_vcpu_cb__udata(cpu, QEMU_PLUGIN_EV_VCPU_EXIT);
     qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_NO_REGS);
 
@@ -835,6 +837,91 @@ void qemu_plugin_user_postfork(bool is_child)
         qemu_rec_mutex_init(&plugin.lock);
     } else {
         qemu_rec_mutex_unlock(&plugin.lock);
+    }
+}
+
+void qemu_plugin_register_user_task_cb(qemu_plugin_id_t id,
+                                       qemu_plugin_user_task_cb_t cb,
+                                       void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_USER_TASK, cb, userdata);
+}
+
+void qemu_plugin_register_user_mapping_cb(qemu_plugin_id_t id,
+                                           qemu_plugin_user_mapping_cb_t cb,
+                                           void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_USER_MAPPING, cb, userdata);
+}
+
+/* Both notifications are synchronous; event-owned strings expire on return. */
+QEMU_DISABLE_CFI
+void qemu_plugin_user_task_notify(enum qemu_plugin_user_task_event_type type,
+                                  uint64_t related_pid, const char *path)
+{
+    struct qemu_plugin_user_task_event event = {
+        .struct_size = sizeof(event),
+        .type = type,
+        .related_pid = related_pid,
+        .path = path,
+    };
+    struct qemu_plugin_cb *cb, *next;
+
+    if (!test_bit(QEMU_PLUGIN_EV_USER_TASK, plugin.mask) ||
+        !qemu_plugin_get_exec_context(&event.context,
+                                      sizeof(event.context)) ||
+        event.context.system_emulation) {
+        return;
+    }
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_USER_TASK],
+                           entry, next) {
+        cb->f.user_task(&event, cb->udata);
+    }
+}
+
+QEMU_DISABLE_CFI
+void qemu_plugin_user_mapping_notify(
+    enum qemu_plugin_user_mapping_event_type type,
+    uint64_t addr, uint64_t len, uint64_t old_addr, uint64_t old_len,
+    uint32_t prot, uint32_t flags, int fd, uint64_t offset)
+{
+    struct qemu_plugin_user_mapping_event event = {
+        .struct_size = sizeof(event),
+        .type = type,
+        .addr = addr,
+        .len = len,
+        .old_addr = old_addr,
+        .old_len = old_len,
+        .prot = prot,
+        .flags = flags,
+        .offset = offset,
+    };
+    struct qemu_plugin_cb *cb, *next;
+    g_autofree char *path = NULL;
+
+    if (!test_bit(QEMU_PLUGIN_EV_USER_MAPPING, plugin.mask) ||
+        !qemu_plugin_get_exec_context(&event.context,
+                                      sizeof(event.context)) ||
+        event.context.system_emulation) {
+        return;
+    }
+
+    if (fd >= 0) {
+        struct stat st;
+        g_autofree char *link = g_strdup_printf("/proc/self/fd/%d", fd);
+
+        if (fstat(fd, &st) == 0) {
+            event.file_dev = st.st_dev;
+            event.file_ino = st.st_ino;
+        }
+        path = g_file_read_link(link, NULL);
+        event.path = path;
+    }
+
+    QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_USER_MAPPING],
+                           entry, next) {
+        cb->f.user_mapping(&event, cb->udata);
     }
 }
 

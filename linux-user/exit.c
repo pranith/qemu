@@ -29,6 +29,7 @@ extern void __gcov_dump(void);
 
 void preexit_cleanup(CPUArchState *env, int code)
 {
+        qemu_plugin_user_task_notify(QEMU_PLUGIN_USER_PROCESS_EXIT, 0, NULL);
 #ifdef CONFIG_GCOV
         __gcov_dump();
 #endif

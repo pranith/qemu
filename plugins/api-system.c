@@ -18,6 +18,20 @@
 #include "qemu/plugin-memory.h"
 #include "qemu/plugin.h"
 
+bool qemu_plugin_get_exec_context(struct qemu_plugin_exec_context *context,
+                                  size_t size)
+{
+    if (!context || size < sizeof(*context) || !current_cpu) {
+        return false;
+    }
+
+    memset(context, 0, sizeof(*context));
+    context->system_emulation = true;
+    context->vcpu_index = current_cpu->cpu_index;
+    context->valid_fields = QEMU_PLUGIN_CONTEXT_VCPU;
+    return true;
+}
+
 /*
  * In system mode we cannot trace the binary being executed so the
  * helpers all return NULL/0.

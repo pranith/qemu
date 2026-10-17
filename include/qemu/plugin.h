@@ -72,6 +72,8 @@ union qemu_plugin_cb_sig {
     qemu_plugin_vcpu_syscall_cb_t        vcpu_syscall;
     qemu_plugin_vcpu_syscall_ret_cb_t    vcpu_syscall_ret;
     qemu_plugin_vcpu_syscall_filter_cb_t vcpu_syscall_filter;
+    qemu_plugin_user_task_cb_t           user_task;
+    qemu_plugin_user_mapping_cb_t        user_mapping;
     void *generic;
 };
 
@@ -227,6 +229,13 @@ void qemu_plugin_user_prefork_lock(void);
  */
 void qemu_plugin_user_postfork(bool is_child);
 
+void qemu_plugin_user_task_notify(enum qemu_plugin_user_task_event_type type,
+                                  uint64_t related_pid, const char *path);
+void qemu_plugin_user_mapping_notify(
+    enum qemu_plugin_user_mapping_event_type type,
+    uint64_t addr, uint64_t len, uint64_t old_addr, uint64_t old_len,
+    uint32_t prot, uint32_t flags, int fd, uint64_t offset);
+
 enum qemu_plugin_cb_flags tcg_call_to_qemu_plugin_cb_flags(int flags);
 
 static inline void qemu_plugin_set_cb_flags(CPUState *cpu,
@@ -331,6 +340,17 @@ static inline void qemu_plugin_user_prefork_lock(void)
 { }
 
 static inline void qemu_plugin_user_postfork(bool is_child)
+{ }
+
+static inline void qemu_plugin_user_task_notify(
+    enum qemu_plugin_user_task_event_type type,
+    uint64_t related_pid, const char *path)
+{ }
+
+static inline void qemu_plugin_user_mapping_notify(
+    enum qemu_plugin_user_mapping_event_type type,
+    uint64_t addr, uint64_t len, uint64_t old_addr, uint64_t old_len,
+    uint32_t prot, uint32_t flags, int fd, uint64_t offset)
 { }
 
 #endif /* !CONFIG_PLUGIN */

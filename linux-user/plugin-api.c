@@ -12,5 +12,27 @@
 
 #include "qemu/osdep.h"
 #include "qemu.h"
+#include "user-internals.h"
 #include "loader.h"
 #include "common-user/plugin-api.c.inc"
+
+bool qemu_plugin_get_exec_context(struct qemu_plugin_exec_context *context,
+                                  size_t size)
+{
+    CPUState *cpu = current_cpu ? current_cpu : thread_cpu;
+    TaskState *task;
+
+    if (!context || size < sizeof(*context) || !cpu) {
+        return false;
+    }
+
+    memset(context, 0, sizeof(*context));
+    context->vcpu_index = cpu->cpu_index;
+    context->pid = getpid();
+    task = get_task_state(cpu);
+    context->tid = task && task->ts_tid ? task->ts_tid : syscall(SYS_gettid);
+    context->valid_fields = QEMU_PLUGIN_CONTEXT_VCPU |
+                            QEMU_PLUGIN_CONTEXT_PID |
+                            QEMU_PLUGIN_CONTEXT_TID;
+    return true;
+}

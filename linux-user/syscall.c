@@ -9119,6 +9119,7 @@ static int do_execv(CPUArchState *cpu_env, int dirfd,
     if (is_proc_myself(p, "exe")) {
         exe = real_exec_path;
     }
+    qemu_plugin_user_task_notify(QEMU_PLUGIN_USER_EXEC_ATTEMPT, 0, p);
     ret = is_execveat
         ? safe_execveat(dirfd, exe, argp, envp, flags)
         : safe_execve(exe, argp, envp);

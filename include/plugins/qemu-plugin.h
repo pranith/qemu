@@ -91,11 +91,108 @@ typedef uint64_t qemu_plugin_id_t;
  *
  * version 9 (local experiment):
  * - report whether an atomic compare-and-swap committed its store
+ *
+ * version 10 (local experiment):
+ * - expose execution context and linux-user task and mapping events
  */
 
 extern QEMU_PLUGIN_EXPORT int qemu_plugin_version;
 
-#define QEMU_PLUGIN_VERSION 9
+#define QEMU_PLUGIN_VERSION 10
+
+/** Fields available in qemu_plugin_exec_context. */
+enum qemu_plugin_context_field {
+    QEMU_PLUGIN_CONTEXT_VCPU = 1U << 0,
+    QEMU_PLUGIN_CONTEXT_PID = 1U << 1,
+    QEMU_PLUGIN_CONTEXT_TID = 1U << 2,
+};
+
+/**
+ * Execution identity at the point where a plugin callback runs.
+ * PID and TID are available in linux-user; system emulation only provides
+ * the vCPU index. They must not be interpreted as guest task IDs in system
+ * emulation. The values are a snapshot, not a persistent object handle.
+ * Call qemu_plugin_get_exec_context() with size set to sizeof(*context).
+ */
+struct qemu_plugin_exec_context {
+    uint32_t valid_fields;
+    bool system_emulation;
+    unsigned int vcpu_index;
+    uint64_t pid;
+    uint64_t tid;
+};
+
+QEMU_PLUGIN_API
+bool qemu_plugin_get_exec_context(struct qemu_plugin_exec_context *context,
+                                  size_t size);
+
+enum qemu_plugin_user_task_event_type {
+    QEMU_PLUGIN_USER_THREAD_START,
+    QEMU_PLUGIN_USER_THREAD_EXIT,
+    QEMU_PLUGIN_USER_FORK_PARENT,
+    QEMU_PLUGIN_USER_FORK_CHILD,
+    QEMU_PLUGIN_USER_EXEC_ATTEMPT,
+    QEMU_PLUGIN_USER_PROCESS_EXIT,
+};
+
+/** The event and path pointers are valid only for the duration of the call. */
+struct qemu_plugin_user_task_event {
+    size_t struct_size;
+    enum qemu_plugin_user_task_event_type type;
+    struct qemu_plugin_exec_context context;
+    uint64_t related_pid; /* child PID for FORK_PARENT, parent for CHILD */
+    const char *path;     /* guest exec path for EXEC_ATTEMPT */
+};
+
+typedef void (*qemu_plugin_user_task_cb_t)(
+    const struct qemu_plugin_user_task_event *event, void *userdata);
+
+/** Linux-user only. A system emulator never calls this callback. */
+QEMU_PLUGIN_API
+void qemu_plugin_register_user_task_cb(qemu_plugin_id_t id,
+                                       qemu_plugin_user_task_cb_t cb,
+                                       void *userdata);
+
+enum qemu_plugin_user_mapping_event_type {
+    QEMU_PLUGIN_USER_MAP,
+    QEMU_PLUGIN_USER_UNMAP,
+    QEMU_PLUGIN_USER_PROTECT,
+    QEMU_PLUGIN_USER_REMAP,
+};
+
+/**
+ * A successful linux-user mapping change. Addresses and lengths refer to
+ * guest pages. PROT bits are guest bits; flags are Linux MAP/MREMAP bits.
+ * The file name is best effort and valid only during the callback. A MAP at
+ * an occupied address replaces that range. REMAP supplies old_addr/old_len.
+ */
+struct qemu_plugin_user_mapping_event {
+    size_t struct_size;
+    enum qemu_plugin_user_mapping_event_type type;
+    struct qemu_plugin_exec_context context;
+    uint64_t addr;
+    uint64_t len;
+    uint64_t old_addr;
+    uint64_t old_len;
+    uint64_t offset;
+    uint64_t file_dev;
+    uint64_t file_ino;
+    uint32_t prot;
+    uint32_t flags;
+    const char *path;
+};
+
+typedef void (*qemu_plugin_user_mapping_cb_t)(
+    const struct qemu_plugin_user_mapping_event *event, void *userdata);
+
+/**
+ * Linux-user only. Mapping callbacks run under the guest mapping lock.
+ * They must not call APIs that access or change guest mappings.
+ */
+QEMU_PLUGIN_API
+void qemu_plugin_register_user_mapping_cb(qemu_plugin_id_t id,
+                                           qemu_plugin_user_mapping_cb_t cb,
+                                           void *userdata);
 
 /**
  * struct qemu_info_t - system information for plugins
