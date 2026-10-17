@@ -6,6 +6,8 @@ contrib_plugins = [
 'execlog.c',
 'hotblocks.c',
 'hotpages.c',
+'memprof.c',
+'lockprof.c',
 'howvec.c',
 'hwprofile.c',
 'ips.c',
