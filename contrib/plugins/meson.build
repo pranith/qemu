@@ -8,6 +8,7 @@ contrib_plugins = [
 'hotpages.c',
 'memprof.c',
 'lockprof.c',
+'rareprof.c',
 'howvec.c',
 'hwprofile.c',
 'ips.c',
