@@ -132,6 +132,10 @@ tests += {
   multiarch/'plugin/test-plugin-analysis-api.c': {
     'plugin_test': {'plugin': 'analysis-api', 'args': ['image=on']},
   },
+  multiarch/'plugin/test-plugin-analysis-api-threads.c': {
+    'cflags': ['-lpthread'],
+    'plugin_test': {'plugin': 'analysis-api', 'args': ['min_vcpus=4']},
+  },
 }
 
 # Test plugin memory access instrumentation

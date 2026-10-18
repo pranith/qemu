@@ -25,6 +25,17 @@ __attribute__((noinline)) unsigned long analysis_target(unsigned long value)
     return value * 3 + 1;
 }
 
+__attribute__((noinline))
+unsigned long analysis_replacement(unsigned long value)
+{
+    return value * 5 + 7;
+}
+
+__attribute__((noinline)) unsigned long analysis_original(unsigned long value)
+{
+    return value + 1;
+}
+
 int main(void)
 {
     char path[] = "/tmp/qemu-analysis-image-XXXXXX";
@@ -65,6 +76,15 @@ int main(void)
 
     for (unsigned long i = 0; i < 16; i++) {
         result += analysis_target(i);
+    }
+
+    /* Keep both calls visible to the translator across optimization levels. */
+    volatile unsigned long replacement_arg = 1;
+    /* Keep the original call visible for redirect instrumentation. */
+    volatile unsigned long original_arg = 2;
+    if (analysis_replacement(replacement_arg) != 12 ||
+        analysis_original(original_arg) != 17) {
+        return 9;
     }
 
     for (unsigned long i = 0; i < 1000; i++) {
