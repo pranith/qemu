@@ -10,6 +10,7 @@ contrib_plugins = [
 'lockprof.c',
 'rareprof.c',
 'userprof.c',
+'triage.c',
 'howvec.c',
 'hwprofile.c',
 'ips.c',
