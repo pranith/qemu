@@ -106,11 +106,21 @@ typedef uint64_t qemu_plugin_id_t;
  * - expose guest exception indices and Linux-user queued signals
  * - add plugin-owned per-vCPU storage with automatic cleanup
  * - add automatic instruction and memory trace records
+ *
+ * version 12 (local experiment):
+ * - expose target instruction operands and register access metadata
+ * - allow a translated guest instruction to redirect to a guest PC
+ * - add a saved register-context API for the current vCPU
+ * - report observed branch successors and unambiguous outcomes
+ * - fill automatic instruction trace records from generated TCG code
+ * - enumerate ELF sections and function symbols in Linux-user images
+ * - resolve Linux-user image addresses to source locations when libdw exists
+ * - request a stopped-vCPU callback outside translated execution
  */
 
 extern QEMU_PLUGIN_EXPORT int qemu_plugin_version;
 
-#define QEMU_PLUGIN_VERSION 11
+#define QEMU_PLUGIN_VERSION 12
 
 /** Fields available in qemu_plugin_exec_context. */
 enum qemu_plugin_context_field {
@@ -264,6 +274,54 @@ void qemu_plugin_register_user_image_cb(qemu_plugin_id_t id,
 QEMU_PLUGIN_API
 bool qemu_plugin_user_image_lookup(uint64_t vaddr, uint64_t *image_id,
                                    uint64_t *file_offset, char **path);
+
+struct qemu_plugin_user_image_section {
+    const char *name;
+    uint64_t file_offset;
+    uint64_t size;
+    uint64_t flags;
+    bool has_guest_addr;
+    uint64_t guest_addr;
+};
+
+typedef void (*qemu_plugin_user_image_section_cb_t)(
+    const struct qemu_plugin_user_image_section *section, void *userdata);
+
+struct qemu_plugin_user_image_symbol {
+    const char *name;
+    uint64_t size;
+    bool has_guest_addr;
+    uint64_t guest_addr;
+};
+
+typedef void (*qemu_plugin_user_image_symbol_cb_t)(
+    const struct qemu_plugin_user_image_symbol *symbol, void *userdata);
+
+/**
+ * Enumerate ELF sections or function symbols of a tracked Linux-user image.
+ * Returns false if its backing path is no longer available or is not a
+ * supported ELF32/ELF64 file. String pointers expire when each call returns.
+ * Guest addresses are mapped-section estimates and may be unavailable.
+ * Call from a non-hot path; this reads the backing file for each request.
+ */
+QEMU_PLUGIN_API
+bool qemu_plugin_user_image_sections(uint64_t image_id,
+    qemu_plugin_user_image_section_cb_t cb, void *userdata);
+
+QEMU_PLUGIN_API
+bool qemu_plugin_user_image_symbols(uint64_t image_id,
+    qemu_plugin_user_image_symbol_cb_t cb, void *userdata);
+
+/**
+ * Resolve a mapped guest address through the image's DWARF line table.
+ * Returns false without libdw or available debug information. On success,
+ * *path is newly allocated and must be released with g_free(). This reads
+ * the backing image and is intended for a non-hot path.
+ */
+QEMU_PLUGIN_API
+bool qemu_plugin_user_image_source(uint64_t image_id, uint64_t guest_addr,
+                                   char **path, uint32_t *line,
+                                   uint32_t *column);
 
 /**
  * struct qemu_info_t - system information for plugins
@@ -510,6 +568,8 @@ struct qemu_plugin_tb_edge {
     uint64_t sequential_pc;
     uint64_t to_pc;
     uint32_t from_properties;
+    bool has_direct_target;
+    uint64_t direct_target;
 };
 
 typedef void (*qemu_plugin_vcpu_tb_edge_cb_t)(
@@ -520,6 +580,28 @@ QEMU_PLUGIN_API
 void qemu_plugin_register_vcpu_tb_edge_cb(qemu_plugin_id_t id,
                                           qemu_plugin_vcpu_tb_edge_cb_t cb,
                                           void *userdata);
+
+/**
+ * One observed guest branch successor. outcome_known is false if a
+ * conditional branch's target equals its fallthrough PC, or if its direct
+ * target could not be decoded. Exceptions can bypass the exit marker, so
+ * this is not a complete retired-branch stream.
+ */
+struct qemu_plugin_branch_event {
+    struct qemu_plugin_tb_edge edge;
+    bool conditional;
+    bool outcome_known;
+    bool taken;
+};
+
+typedef void (*qemu_plugin_branch_cb_t)(
+    unsigned int vcpu_index, const struct qemu_plugin_branch_event *event,
+    void *userdata);
+
+QEMU_PLUGIN_API
+void qemu_plugin_register_vcpu_branch_cb(qemu_plugin_id_t id,
+                                         qemu_plugin_branch_cb_t cb,
+                                         void *userdata);
 
 enum qemu_plugin_routine_event_type {
     QEMU_PLUGIN_ROUTINE_ENTRY,
@@ -562,6 +644,7 @@ enum qemu_plugin_insn_property {
     QEMU_PLUGIN_INSN_CALL = 1U << 6,
     QEMU_PLUGIN_INSN_RETURN = 1U << 7,
     QEMU_PLUGIN_INSN_ATOMIC_CANDIDATE = 1U << 8,
+    QEMU_PLUGIN_INSN_CONDITIONAL_BRANCH = 1U << 9,
 };
 
 /**
@@ -571,6 +654,63 @@ enum qemu_plugin_insn_property {
  */
 QEMU_PLUGIN_API
 uint32_t qemu_plugin_insn_get_properties(const struct qemu_plugin_insn *insn);
+
+enum qemu_plugin_operand_kind {
+    QEMU_PLUGIN_OPERAND_OTHER,
+    QEMU_PLUGIN_OPERAND_REGISTER,
+    QEMU_PLUGIN_OPERAND_IMMEDIATE,
+    QEMU_PLUGIN_OPERAND_MEMORY,
+};
+
+enum qemu_plugin_operand_access {
+    QEMU_PLUGIN_OPERAND_READ = 1U << 0,
+    QEMU_PLUGIN_OPERAND_WRITE = 1U << 1,
+};
+
+#define QEMU_PLUGIN_DECODE_MAX_OPERANDS 8
+#define QEMU_PLUGIN_DECODE_MAX_REGS 16
+#define QEMU_PLUGIN_DECODE_REG_NAME_SIZE 24
+
+struct qemu_plugin_operand_info {
+    enum qemu_plugin_operand_kind kind;
+    uint8_t access;
+    uint8_t size;
+    char reg[QEMU_PLUGIN_DECODE_REG_NAME_SIZE];
+    char base[QEMU_PLUGIN_DECODE_REG_NAME_SIZE];
+    char index[QEMU_PLUGIN_DECODE_REG_NAME_SIZE];
+    int32_t scale;
+    int64_t value; /* Immediate or memory displacement. */
+};
+
+/** Decoded data for one translated guest instruction. */
+struct qemu_plugin_insn_decode {
+    size_t struct_size;
+    char mnemonic[32];
+    uint32_t properties;
+    uint8_t operand_count;
+    uint8_t read_reg_count;
+    uint8_t write_reg_count;
+    bool operands_truncated;
+    bool regs_truncated;
+    bool has_direct_target;
+    uint64_t direct_target;
+    struct qemu_plugin_operand_info
+        operands[QEMU_PLUGIN_DECODE_MAX_OPERANDS];
+    char read_regs[QEMU_PLUGIN_DECODE_MAX_REGS]
+                  [QEMU_PLUGIN_DECODE_REG_NAME_SIZE];
+    char write_regs[QEMU_PLUGIN_DECODE_MAX_REGS]
+                   [QEMU_PLUGIN_DECODE_REG_NAME_SIZE];
+};
+
+/**
+ * Decode x86 or AArch64 instruction bytes during TB translation. Returns
+ * false when Capstone is unavailable or the instruction cannot be decoded.
+ * System x86 mode transitions are not currently modeled by this query.
+ * This is target ISA metadata, not a record of runtime memory accesses.
+ */
+QEMU_PLUGIN_API
+bool qemu_plugin_insn_decode(const struct qemu_plugin_insn *insn,
+                             struct qemu_plugin_insn_decode *out);
 /** struct qemu_plugin_scoreboard - Opaque handle for a scoreboard */
 struct qemu_plugin_scoreboard;
 
@@ -822,6 +962,16 @@ void qemu_plugin_register_vcpu_insn_after_cb(struct qemu_plugin_insn *insn,
                                              enum qemu_plugin_cb_flags flags,
                                              void *userdata);
 
+/**
+ * Redirect execution at this instruction to another guest PC. Register from
+ * the TB translation callback. This is a TCG guest-code replacement point,
+ * not a native probe or callable original-function trampoline. The plugin
+ * must preserve the guest ABI and avoid redirecting to the same entry.
+ */
+QEMU_PLUGIN_API
+void qemu_plugin_register_vcpu_insn_redirect(struct qemu_plugin_insn *insn,
+                                             uint64_t target_pc);
+
 /** Opaque, plugin-owned collection of fixed-size per-vCPU record buffers. */
 struct qemu_plugin_trace_buffer;
 
@@ -879,8 +1029,9 @@ struct qemu_plugin_trace_record {
 /**
  * Register automatic record capture into a buffer whose record size is
  * sizeof(struct qemu_plugin_trace_record). Records are appended by a QEMU
- * helper called from generated code; batching avoids a plugin callback per
- * event, but does not eliminate the per-event helper call.
+ * helper for memory events. Instruction records are filled directly by TCG
+ * code, with a helper call only on first use and buffer overflow. Memory
+ * records still call a helper for each event to resolve access metadata.
  */
 QEMU_PLUGIN_API
 bool qemu_plugin_register_vcpu_insn_trace(struct qemu_plugin_insn *insn,
@@ -1592,6 +1743,75 @@ bool qemu_plugin_read_register(struct qemu_plugin_register *handle,
 QEMU_PLUGIN_API
 bool qemu_plugin_write_register(struct qemu_plugin_register *handle,
                                 GByteArray *buf);
+
+struct qemu_plugin_cpu_context;
+
+typedef void (*qemu_plugin_exclusive_cb_t)(unsigned int requester_vcpu,
+                                          void *userdata);
+
+/**
+ * Leave translated execution and invoke cb with other TCG vCPUs stopped at
+ * an execution boundary. Call only from an instruction-before callback and
+ * pass that instruction's qemu_plugin_insn_vaddr() as resume_pc. Register
+ * the callback with QEMU_PLUGIN_CB_RW_REGS_PC.
+ * On success the requesting callback does not return; the guest instruction
+ * is retried after cb returns. Requesting after guest side effects can
+ * duplicate those effects. Returns false if no vCPU is executing.
+ * The callback must not block on work from another stopped vCPU.
+ * The request is dropped if id is uninstalled before the callback runs.
+ */
+QEMU_PLUGIN_API
+bool qemu_plugin_request_exclusive(qemu_plugin_id_t id, uint64_t resume_pc,
+                                   qemu_plugin_exclusive_cb_t cb,
+                                   void *userdata);
+
+/** Capture a stopped vCPU during the exclusive callback. */
+QEMU_PLUGIN_API
+struct qemu_plugin_cpu_context *qemu_plugin_cpu_context_capture_vcpu(
+    unsigned int vcpu_index);
+
+/**
+ * Capture readable guest registers and PC from the current vCPU. Requires a
+ * callback with register-read permission. The context may outlive that
+ * callback, but can only be applied to the same vCPU in a callback with
+ * register-write permission. Register availability is target dependent.
+ */
+QEMU_PLUGIN_API
+struct qemu_plugin_cpu_context *qemu_plugin_cpu_context_capture(void);
+
+QEMU_PLUGIN_API
+bool qemu_plugin_cpu_context_get(const struct qemu_plugin_cpu_context *context,
+                                 const char *name, GByteArray *value);
+
+/** Set a saved writable register; value size must match the captured size. */
+QEMU_PLUGIN_API
+bool qemu_plugin_cpu_context_set(struct qemu_plugin_cpu_context *context,
+                                 const char *name, const GByteArray *value);
+
+QEMU_PLUGIN_API
+uint64_t qemu_plugin_cpu_context_pc(const struct qemu_plugin_cpu_context *ctx);
+
+QEMU_PLUGIN_API
+void qemu_plugin_cpu_context_set_pc(struct qemu_plugin_cpu_context *ctx,
+                                    uint64_t pc);
+
+/**
+ * Apply changed registers. A changed PC is applied only from the stopped-vCPU
+ * callback; from an instruction callback, use resume instead. This operation
+ * is not transactional.
+ */
+QEMU_PLUGIN_API
+bool qemu_plugin_cpu_context_apply(struct qemu_plugin_cpu_context *context);
+
+/**
+ * Apply changed registers, then resume at the saved PC; never returns on
+ * success. Requires QEMU_PLUGIN_CB_RW_REGS_PC.
+ */
+QEMU_PLUGIN_API
+bool qemu_plugin_cpu_context_resume(struct qemu_plugin_cpu_context *context);
+
+QEMU_PLUGIN_API
+void qemu_plugin_cpu_context_free(struct qemu_plugin_cpu_context *context);
 
 /**
  * qemu_plugin_set_pc() - set the program counter for the current vCPU

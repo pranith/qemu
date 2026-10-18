@@ -47,11 +47,26 @@ struct qemu_plugin_ctx *plugin_id_to_ctx_locked(qemu_plugin_id_t id)
     return ctx;
 }
 
+bool plugin_id_live(qemu_plugin_id_t id)
+{
+    bool live;
+
+    qemu_rec_mutex_lock(&plugin.lock);
+    qemu_plugin_id_t *id_p = g_hash_table_lookup(plugin.id_ht, &id);
+    struct qemu_plugin_ctx *ctx = id_p ?
+        container_of(id_p, struct qemu_plugin_ctx, id) : NULL;
+    live = ctx && !ctx->uninstalling && !ctx->resetting;
+    qemu_rec_mutex_unlock(&plugin.lock);
+    return live;
+}
+
 static void plugin_cpu_update__async(CPUState *cpu, run_on_cpu_data data)
 {
     bitmap_copy(cpu->plugin_state->event_mask,
                 &data.host_ulong, QEMU_PLUGIN_EV_MAX);
     if (!test_bit(QEMU_PLUGIN_EV_VCPU_TB_EDGE,
+                  cpu->plugin_state->event_mask) &&
+        !test_bit(QEMU_PLUGIN_EV_VCPU_BRANCH,
                   cpu->plugin_state->event_mask) &&
         !test_bit(QEMU_PLUGIN_EV_VCPU_ROUTINE,
                   cpu->plugin_state->event_mask)) {
@@ -139,7 +154,9 @@ static void plugin_vcpu_cb__discon(CPUState *cpu,
 
 void qemu_plugin_vcpu_tb_edge_exit(unsigned int vcpu_index, uint64_t from_pc,
                                    uint64_t sequential_pc,
-                                   uint32_t from_properties)
+                                   uint32_t from_properties,
+                                   bool has_direct_target,
+                                   uint64_t direct_target)
 {
     CPUPluginState *state = current_cpu->plugin_state;
 
@@ -147,6 +164,8 @@ void qemu_plugin_vcpu_tb_edge_exit(unsigned int vcpu_index, uint64_t from_pc,
     state->edge.from_pc = from_pc;
     state->edge.sequential_pc = sequential_pc;
     state->edge.from_properties = from_properties;
+    state->edge.has_direct_target = has_direct_target;
+    state->edge.direct_target = direct_target;
     state->edge_pending = true;
 }
 
@@ -165,6 +184,30 @@ void qemu_plugin_vcpu_tb_edge_entry(unsigned int vcpu_index, uint64_t to_pc)
     QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_TB_EDGE],
                            entry, next) {
         cb->f.tb_edge(vcpu_index, &state->edge, cb->udata);
+    }
+
+    if ((state->edge.from_properties & QEMU_PLUGIN_INSN_BRANCH) &&
+        test_bit(QEMU_PLUGIN_EV_VCPU_BRANCH, state->event_mask)) {
+        struct qemu_plugin_branch_event event = {
+            .edge = state->edge,
+            .conditional = !!(state->edge.from_properties &
+                              QEMU_PLUGIN_INSN_CONDITIONAL_BRANCH),
+        };
+
+        if (!event.conditional) {
+            event.outcome_known = true;
+            event.taken = true;
+        } else if (state->edge.has_direct_target &&
+                   state->edge.direct_target != state->edge.sequential_pc &&
+                   (to_pc == state->edge.direct_target ||
+                    to_pc == state->edge.sequential_pc)) {
+            event.outcome_known = true;
+            event.taken = to_pc == state->edge.direct_target;
+        }
+        QLIST_FOREACH_SAFE_RCU(cb, &plugin.cb_lists[QEMU_PLUGIN_EV_VCPU_BRANCH],
+                               entry, next) {
+            cb->f.branch(vcpu_index, &event, cb->udata);
+        }
     }
 
     if (test_bit(QEMU_PLUGIN_EV_VCPU_ROUTINE, state->event_mask)) {
@@ -275,6 +318,31 @@ plugin_register_cb_udata(qemu_plugin_id_t id, enum qemu_plugin_event ev,
 CPUPluginState *qemu_plugin_create_vcpu_state(void)
 {
     return g_new0(CPUPluginState, 1);
+}
+
+void qemu_plugin_process_exclusive(CPUState *cpu)
+{
+    qemu_plugin_exclusive_cb_t cb = cpu->plugin_state->exclusive_cb;
+    qemu_plugin_id_t id = cpu->plugin_state->exclusive_id;
+    void *userdata = cpu->plugin_state->exclusive_userdata;
+
+    if (!cb) {
+        return;
+    }
+    cpu->plugin_state->exclusive_cb = NULL;
+    cpu->plugin_state->exclusive_userdata = NULL;
+    start_exclusive();
+    qemu_rec_mutex_lock(&plugin.lock);
+    qemu_plugin_id_t *id_p = g_hash_table_lookup(plugin.id_ht, &id);
+    struct qemu_plugin_ctx *ctx = id_p ?
+        container_of(id_p, struct qemu_plugin_ctx, id) : NULL;
+    if (ctx && !ctx->uninstalling && !ctx->resetting) {
+        qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_RW_REGS);
+        cb(cpu->cpu_index, userdata);
+        qemu_plugin_set_cb_flags(cpu, QEMU_PLUGIN_CB_NO_REGS);
+    }
+    qemu_rec_mutex_unlock(&plugin.lock);
+    end_exclusive();
 }
 
 static void plugin_grow_scoreboards__locked(CPUState *cpu)
@@ -575,6 +643,14 @@ void plugin_register_trace_cb(GArray **arr,
     dyn_cb->trace.pc = pc;
     dyn_cb->trace.kind = kind;
     dyn_cb->trace.rw = rw;
+}
+
+void plugin_register_redirect_cb(GArray **arr, uint64_t target_pc)
+{
+    struct qemu_plugin_dyn_cb *cb = plugin_get_dyn_cb(arr);
+
+    cb->type = PLUGIN_CB_REDIRECT;
+    cb->redirect_pc = target_pc;
 }
 
 /*
@@ -1455,6 +1531,52 @@ bool qemu_plugin_user_image_lookup(uint64_t vaddr, uint64_t *image_id,
         }
     }
     return false;
+}
+
+bool plugin_user_image_snapshot(uint64_t image_id, PluginImageSnapshot *out)
+{
+    struct qemu_plugin_exec_context context;
+
+    memset(out, 0, sizeof(*out));
+    if (!qemu_plugin_get_exec_context(&context, sizeof(context)) ||
+        context.system_emulation) {
+        return false;
+    }
+    QEMU_LOCK_GUARD(&plugin.lock);
+    if (!plugin_images) {
+        return false;
+    }
+    for (guint i = 0; i < plugin_images->len; i++) {
+        PluginImage *image = g_ptr_array_index(plugin_images, i);
+
+        if (image->id != image_id || image->pid != context.pid) {
+            continue;
+        }
+        out->path = g_strdup(image->path);
+        out->maps = g_array_new(false, false, sizeof(PluginImageMap));
+        for (guint j = 0; j < plugin_image_segments->len; j++) {
+            PluginImageSegment *seg =
+                g_ptr_array_index(plugin_image_segments, j);
+            if (seg->image == image) {
+                PluginImageMap map = {
+                    .start = seg->start,
+                    .len = seg->len,
+                    .offset = seg->offset,
+                };
+                g_array_append_val(out->maps, map);
+            }
+        }
+        return out->path != NULL;
+    }
+    return false;
+}
+
+void plugin_user_image_snapshot_free(PluginImageSnapshot *snapshot)
+{
+    g_free(snapshot->path);
+    if (snapshot->maps) {
+        g_array_unref(snapshot->maps);
+    }
 }
 
 /* Both notifications are synchronous; event-owned strings expire on return. */

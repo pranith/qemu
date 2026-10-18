@@ -81,8 +81,11 @@ endif
 user_ss.add(files('user.c', 'api-user.c'))
 system_ss.add(files('system.c', 'api-system.c'))
 
-user_ss.add(files('api.c', 'core.c'))
-system_ss.add(files('api.c', 'core.c'))
+user_ss.add(files('api.c', 'core.c', 'image-elf.c'))
+system_ss.add(files('api.c', 'core.c', 'image-elf.c'))
+user_ss.add(capstone)
+system_ss.add(capstone)
+user_ss.add(libdw)
+system_ss.add(libdw)
 
 common_ss.add(files('loader.c'))
-

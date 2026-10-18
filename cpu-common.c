@@ -18,6 +18,9 @@
  */
 
 #include "qemu/osdep.h"
+#ifdef CONFIG_PLUGIN
+#include "qemu/plugin.h"
+#endif
 #include "qemu/main-loop.h"
 #include "exec/cpu-common.h"
 #include "hw/core/cpu.h"
@@ -322,6 +325,11 @@ void cpu_exec_end(CPUState *cpu)
         }
     }
     trace_cpu_exec_end(cpu->cpu_index);
+#ifdef CONFIG_PLUGIN
+    if (cpu->plugin_state && cpu->plugin_state->exclusive_cb) {
+        qemu_plugin_process_exclusive(cpu);
+    }
+#endif
 }
 
 void async_safe_run_on_cpu(CPUState *cpu, run_on_cpu_func func,

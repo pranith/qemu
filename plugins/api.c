@@ -49,6 +49,8 @@
 #include "exec/translation-block.h"
 #include "exec/translator.h"
 #include "disas/disas.h"
+#include "disas/capstone.h"
+#include "qemu/target-info.h"
 #include "plugin.h"
 
 /* Uninstall and Reset handlers */
@@ -151,6 +153,21 @@ void qemu_plugin_register_vcpu_insn_after_cb(struct qemu_plugin_insn *insn,
     }
 }
 
+void qemu_plugin_register_vcpu_insn_redirect(struct qemu_plugin_insn *insn,
+                                             uint64_t target_pc)
+{
+    if (!tb_is_mem_only()) {
+        plugin_register_redirect_cb(&insn->insn_cbs, target_pc);
+    }
+}
+
+G_NORETURN void qemu_plugin_redirect_pc(uint64_t target_pc)
+{
+    g_assert(current_cpu);
+    cpu_set_pc(current_cpu, target_pc);
+    cpu_loop_exit(current_cpu);
+}
+
 void qemu_plugin_register_vcpu_insn_exec_cond_cb(
     struct qemu_plugin_insn *insn,
     qemu_plugin_vcpu_udata_cb_t cb,
@@ -235,6 +252,13 @@ void qemu_plugin_register_vcpu_tb_edge_cb(qemu_plugin_id_t id,
                                           void *userdata)
 {
     plugin_register_cb_udata(id, QEMU_PLUGIN_EV_VCPU_TB_EDGE, cb, userdata);
+}
+
+void qemu_plugin_register_vcpu_branch_cb(qemu_plugin_id_t id,
+                                         qemu_plugin_branch_cb_t cb,
+                                         void *userdata)
+{
+    plugin_register_cb_udata(id, QEMU_PLUGIN_EV_VCPU_BRANCH, cb, userdata);
 }
 
 void qemu_plugin_register_routine_cb(qemu_plugin_id_t id,
@@ -327,6 +351,170 @@ size_t qemu_plugin_insn_size(const struct qemu_plugin_insn *insn)
 uint32_t qemu_plugin_insn_get_properties(const struct qemu_plugin_insn *insn)
 {
     return insn->properties;
+}
+
+#ifdef CONFIG_CAPSTONE
+static void plugin_decode_reg_name(csh handle, unsigned int reg,
+                                   char dest[QEMU_PLUGIN_DECODE_REG_NAME_SIZE])
+{
+    const char *name = cs_reg_name(handle, reg);
+
+    if (name) {
+        g_strlcpy(dest, name, QEMU_PLUGIN_DECODE_REG_NAME_SIZE);
+    }
+}
+
+static void plugin_decode_x86(csh handle, const cs_insn *decoded,
+                              struct qemu_plugin_insn_decode *out)
+{
+    const cs_x86 *x86 = &decoded->detail->x86;
+
+    out->operand_count = MIN(x86->op_count, QEMU_PLUGIN_DECODE_MAX_OPERANDS);
+    out->operands_truncated = x86->op_count > out->operand_count;
+    for (unsigned int i = 0; i < out->operand_count; i++) {
+        const cs_x86_op *src = &x86->operands[i];
+        struct qemu_plugin_operand_info *dst = &out->operands[i];
+
+        dst->access = src->access;
+        dst->size = src->size;
+        switch (src->type) {
+        case X86_OP_REG:
+            dst->kind = QEMU_PLUGIN_OPERAND_REGISTER;
+            plugin_decode_reg_name(handle, src->reg, dst->reg);
+            break;
+        case X86_OP_IMM:
+            dst->kind = QEMU_PLUGIN_OPERAND_IMMEDIATE;
+            dst->value = src->imm;
+            if (out->properties & QEMU_PLUGIN_INSN_BRANCH) {
+                out->has_direct_target = true;
+                out->direct_target = src->imm;
+            }
+            break;
+        case X86_OP_MEM:
+            dst->kind = QEMU_PLUGIN_OPERAND_MEMORY;
+            plugin_decode_reg_name(handle, src->mem.base, dst->base);
+            plugin_decode_reg_name(handle, src->mem.index, dst->index);
+            dst->scale = src->mem.scale;
+            dst->value = src->mem.disp;
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+static void plugin_decode_aarch64(csh handle, const cs_insn *decoded,
+                                  struct qemu_plugin_insn_decode *out)
+{
+    const cs_arm64 *a64 = &decoded->detail->arm64;
+
+    out->operand_count = MIN(a64->op_count, QEMU_PLUGIN_DECODE_MAX_OPERANDS);
+    out->operands_truncated = a64->op_count > out->operand_count;
+    for (unsigned int i = 0; i < out->operand_count; i++) {
+        const cs_arm64_op *src = &a64->operands[i];
+        struct qemu_plugin_operand_info *dst = &out->operands[i];
+
+        dst->access = src->access;
+        switch (src->type) {
+        case ARM64_OP_REG:
+            dst->kind = QEMU_PLUGIN_OPERAND_REGISTER;
+            plugin_decode_reg_name(handle, src->reg, dst->reg);
+            break;
+        case ARM64_OP_IMM:
+            dst->kind = QEMU_PLUGIN_OPERAND_IMMEDIATE;
+            dst->value = src->imm;
+            if (out->properties & QEMU_PLUGIN_INSN_BRANCH) {
+                out->has_direct_target = true;
+                out->direct_target = src->imm;
+            }
+            break;
+        case ARM64_OP_MEM:
+            dst->kind = QEMU_PLUGIN_OPERAND_MEMORY;
+            plugin_decode_reg_name(handle, src->mem.base, dst->base);
+            plugin_decode_reg_name(handle, src->mem.index, dst->index);
+            dst->value = src->mem.disp;
+            break;
+        default:
+            break;
+        }
+    }
+}
+#endif
+
+bool qemu_plugin_insn_decode(const struct qemu_plugin_insn *insn,
+                             struct qemu_plugin_insn_decode *out)
+{
+    if (!insn || !out || out->struct_size != sizeof(*out)) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    out->struct_size = sizeof(*out);
+#ifdef CONFIG_CAPSTONE
+    uint8_t code[16];
+    const char *target = target_name();
+    cs_arch arch;
+    cs_mode mode;
+    csh handle;
+    cs_insn *decoded = NULL;
+    bool result = false;
+
+    if (strcmp(target, "x86_64") == 0) {
+        arch = CS_ARCH_X86;
+        mode = CS_MODE_64;
+    } else if (strcmp(target, "i386") == 0) {
+        arch = CS_ARCH_X86;
+        mode = CS_MODE_32;
+    } else if (strcmp(target, "aarch64") == 0) {
+        arch = CS_ARCH_ARM64;
+        mode = CS_MODE_ARM;
+    } else {
+        return false;
+    }
+    if (!insn->len || insn->len > sizeof(code) ||
+        qemu_plugin_insn_data(insn, code, insn->len) != insn->len ||
+        cs_open(arch, mode, &handle) != CS_ERR_OK) {
+        return false;
+    }
+    cs_option(handle, CS_OPT_DETAIL, CS_OPT_ON);
+    if (cs_disasm(handle, code, insn->len, insn->vaddr, 1, &decoded) == 1 &&
+        decoded->size == insn->len && decoded->detail) {
+        cs_regs read_regs, write_regs;
+        uint8_t read_count, write_count;
+
+        g_strlcpy(out->mnemonic, decoded->mnemonic,
+                  sizeof(out->mnemonic));
+        out->properties = insn->properties;
+        if (arch == CS_ARCH_X86) {
+            plugin_decode_x86(handle, decoded, out);
+        } else {
+            plugin_decode_aarch64(handle, decoded, out);
+        }
+        if (cs_regs_access(handle, decoded, read_regs, &read_count,
+                           write_regs, &write_count) == CS_ERR_OK) {
+            out->read_reg_count = MIN(read_count, QEMU_PLUGIN_DECODE_MAX_REGS);
+            out->write_reg_count = MIN(write_count,
+                                       QEMU_PLUGIN_DECODE_MAX_REGS);
+            out->regs_truncated = read_count > out->read_reg_count ||
+                                  write_count > out->write_reg_count;
+            for (unsigned int i = 0; i < out->read_reg_count; i++) {
+                plugin_decode_reg_name(handle, read_regs[i],
+                                       out->read_regs[i]);
+            }
+            for (unsigned int i = 0; i < out->write_reg_count; i++) {
+                plugin_decode_reg_name(handle, write_regs[i],
+                                       out->write_regs[i]);
+            }
+        }
+        result = true;
+    }
+    if (decoded) {
+        cs_free(decoded, 1);
+    }
+    cs_close(&handle);
+    return result;
+#else
+    return false;
+#endif
 }
 
 uint64_t qemu_plugin_insn_vaddr(const struct qemu_plugin_insn *insn)
@@ -575,6 +763,225 @@ bool qemu_plugin_write_register(struct qemu_plugin_register *reg,
                                (GPOINTER_TO_INT(reg) >> 1) - 1) > 0);
 }
 
+typedef struct {
+    char *name;
+    struct qemu_plugin_register *handle;
+    GByteArray *value;
+    bool readonly;
+    bool dirty;
+} PluginSavedRegister;
+
+struct qemu_plugin_cpu_context {
+    unsigned int vcpu_index;
+    CPUState *cpu;
+    uint64_t pc;
+    bool pc_dirty;
+    GPtrArray *registers;
+};
+
+static void plugin_saved_register_free(gpointer data)
+{
+    PluginSavedRegister *reg = data;
+
+    g_free(reg->name);
+    g_byte_array_unref(reg->value);
+    g_free(reg);
+}
+
+static struct qemu_plugin_cpu_context *plugin_context_capture_cpu(CPUState *cpu)
+{
+    struct qemu_plugin_cpu_context *context;
+    g_autoptr(GArray) raw_descriptors = gdb_get_register_list(cpu);
+    g_autoptr(GArray) descriptors = create_register_handles(raw_descriptors);
+
+    context = g_new0(struct qemu_plugin_cpu_context, 1);
+    context->vcpu_index = cpu->cpu_index;
+    context->cpu = cpu;
+    context->pc = cpu->cc->get_pc(cpu);
+    context->registers = g_ptr_array_new_with_free_func(
+        plugin_saved_register_free);
+    for (guint i = 0; i < descriptors->len; i++) {
+        const qemu_plugin_reg_descriptor *desc =
+            &g_array_index(descriptors, qemu_plugin_reg_descriptor, i);
+        PluginSavedRegister *reg = g_new0(PluginSavedRegister, 1);
+
+        reg->value = g_byte_array_new();
+        if (gdb_read_register(cpu, reg->value,
+                              (GPOINTER_TO_INT(desc->handle) >> 1) - 1) <= 0) {
+            plugin_saved_register_free(reg);
+            continue;
+        }
+        reg->name = g_strdup(desc->name);
+        reg->handle = desc->handle;
+        reg->readonly = desc->is_readonly;
+        g_ptr_array_add(context->registers, reg);
+    }
+    return context;
+}
+
+struct qemu_plugin_cpu_context *qemu_plugin_cpu_context_capture(void)
+{
+    if (!current_cpu ||
+        qemu_plugin_get_cb_flags() == QEMU_PLUGIN_CB_NO_REGS) {
+        return NULL;
+    }
+    return plugin_context_capture_cpu(current_cpu);
+}
+
+struct qemu_plugin_cpu_context *qemu_plugin_cpu_context_capture_vcpu(
+    unsigned int vcpu_index)
+{
+    CPUState *cpu;
+
+    if (!current_cpu || !current_cpu->exclusive_context_count) {
+        return NULL;
+    }
+    CPU_FOREACH(cpu) {
+        if (cpu->cpu_index == vcpu_index) {
+            return plugin_context_capture_cpu(cpu);
+        }
+    }
+    return NULL;
+}
+
+bool qemu_plugin_request_exclusive(qemu_plugin_id_t id, uint64_t resume_pc,
+                                   qemu_plugin_exclusive_cb_t cb,
+                                   void *userdata)
+{
+    bool live;
+
+    if (!current_cpu || !current_cpu->running || !cb ||
+        qemu_plugin_get_cb_flags() != QEMU_PLUGIN_CB_RW_REGS_PC ||
+        current_cpu->plugin_state->exclusive_cb) {
+        return false;
+    }
+    live = plugin_id_live(id);
+    if (!live) {
+        return false;
+    }
+    current_cpu->plugin_state->exclusive_cb = cb;
+    current_cpu->plugin_state->exclusive_id = id;
+    current_cpu->plugin_state->exclusive_userdata = userdata;
+    cpu_set_pc(current_cpu, resume_pc);
+#ifndef CONFIG_USER_ONLY
+    cpu_exit(current_cpu);
+#endif
+    cpu_loop_exit(current_cpu);
+}
+
+static PluginSavedRegister *plugin_context_find(
+    const struct qemu_plugin_cpu_context *context, const char *name)
+{
+    if (!context || !name) {
+        return NULL;
+    }
+    for (guint i = 0; i < context->registers->len; i++) {
+        PluginSavedRegister *reg = g_ptr_array_index(context->registers, i);
+        if (strcmp(reg->name, name) == 0) {
+            return reg;
+        }
+    }
+    return NULL;
+}
+
+bool qemu_plugin_cpu_context_get(const struct qemu_plugin_cpu_context *context,
+                                 const char *name, GByteArray *value)
+{
+    PluginSavedRegister *reg = plugin_context_find(context, name);
+
+    if (!reg || !value) {
+        return false;
+    }
+    g_byte_array_set_size(value, 0);
+    g_byte_array_append(value, reg->value->data, reg->value->len);
+    return true;
+}
+
+bool qemu_plugin_cpu_context_set(struct qemu_plugin_cpu_context *context,
+                                 const char *name, const GByteArray *value)
+{
+    PluginSavedRegister *reg = plugin_context_find(context, name);
+
+    if (!reg || reg->readonly || !value ||
+        value->len != reg->value->len) {
+        return false;
+    }
+    g_byte_array_set_size(reg->value, 0);
+    g_byte_array_append(reg->value, value->data, value->len);
+    reg->dirty = true;
+    return true;
+}
+
+uint64_t qemu_plugin_cpu_context_pc(const struct qemu_plugin_cpu_context *ctx)
+{
+    return ctx ? ctx->pc : 0;
+}
+
+void qemu_plugin_cpu_context_set_pc(struct qemu_plugin_cpu_context *ctx,
+                                    uint64_t pc)
+{
+    if (ctx) {
+        ctx->pc = pc;
+        ctx->pc_dirty = true;
+    }
+}
+
+bool qemu_plugin_cpu_context_apply(struct qemu_plugin_cpu_context *context)
+{
+    enum qemu_plugin_cb_flags flags = qemu_plugin_get_cb_flags();
+
+    if (!context || !current_cpu ||
+        (context->cpu != current_cpu &&
+         !current_cpu->exclusive_context_count) ||
+        (flags != QEMU_PLUGIN_CB_RW_REGS &&
+         flags != QEMU_PLUGIN_CB_RW_REGS_PC)) {
+        return false;
+    }
+    if (context->pc_dirty && !current_cpu->exclusive_context_count) {
+        return false;
+    }
+    for (guint i = 0; i < context->registers->len; i++) {
+        PluginSavedRegister *reg = g_ptr_array_index(context->registers, i);
+        if (reg->dirty &&
+            gdb_write_register(context->cpu, reg->value->data,
+                               (GPOINTER_TO_INT(reg->handle) >> 1) - 1) <= 0) {
+            return false;
+        }
+        reg->dirty = false;
+    }
+    if (context->pc_dirty) {
+        cpu_set_pc(context->cpu, context->pc);
+        context->pc_dirty = false;
+    }
+    return true;
+}
+
+bool qemu_plugin_cpu_context_resume(struct qemu_plugin_cpu_context *context)
+{
+    bool pc_dirty;
+
+    if (!current_cpu || current_cpu->exclusive_context_count ||
+        !context || context->cpu != current_cpu ||
+        qemu_plugin_get_cb_flags() != QEMU_PLUGIN_CB_RW_REGS_PC) {
+        return false;
+    }
+    pc_dirty = context->pc_dirty;
+    context->pc_dirty = false;
+    if (!qemu_plugin_cpu_context_apply(context)) {
+        context->pc_dirty = pc_dirty;
+        return false;
+    }
+    qemu_plugin_set_pc(context->pc);
+}
+
+void qemu_plugin_cpu_context_free(struct qemu_plugin_cpu_context *context)
+{
+    if (context) {
+        g_ptr_array_unref(context->registers);
+        g_free(context);
+    }
+}
+
 void qemu_plugin_set_pc(uint64_t vaddr)
 {
     g_assert(current_cpu);
@@ -738,27 +1145,15 @@ void *qemu_plugin_scoreboard_find(struct qemu_plugin_scoreboard *score,
     return base_ptr + vcpu_index * g_array_get_element_size(score->data);
 }
 
-struct trace_buffer_vcpu {
-    uint8_t *records;
-    size_t used;
-    bool in_callback;
-};
-
-struct qemu_plugin_trace_buffer {
-    struct qemu_plugin_scoreboard *score;
-    size_t record_size;
-    size_t capacity;
-    qemu_plugin_trace_buffer_cb_t cb;
-    void *userdata;
-};
-
 struct qemu_plugin_trace_buffer *qemu_plugin_trace_buffer_new(
     size_t record_size, size_t capacity, qemu_plugin_trace_buffer_cb_t cb,
     void *userdata)
 {
     struct qemu_plugin_trace_buffer *buffer;
 
-    if (!record_size || !capacity || capacity > SIZE_MAX / record_size || !cb) {
+    if (!record_size || !capacity ||
+        capacity > UINT32_MAX / record_size ||
+        capacity > SIZE_MAX / record_size || !cb) {
         return NULL;
     }
     buffer = g_new0(struct qemu_plugin_trace_buffer, 1);
@@ -806,6 +1201,9 @@ bool qemu_plugin_trace_buffer_append(struct qemu_plugin_trace_buffer *buffer,
     }
     if (!vcpu->records) {
         vcpu->records = g_malloc(buffer->record_size * buffer->capacity);
+    }
+    if (vcpu->used == buffer->capacity) {
+        qemu_plugin_trace_buffer_flush(buffer, vcpu_index);
     }
     memcpy(vcpu->records + buffer->record_size * vcpu->used,
            record, buffer->record_size);

@@ -68,6 +68,7 @@ struct qemu_plugin_ctx {
 };
 
 struct qemu_plugin_ctx *plugin_id_to_ctx_locked(qemu_plugin_id_t id);
+bool plugin_id_live(qemu_plugin_id_t id);
 
 void plugin_register_inline_op_on_entry(GArray **arr,
                                         enum qemu_plugin_mem_rw rw,
@@ -121,6 +122,20 @@ void plugin_register_trace_cb(GArray **arr,
                               struct qemu_plugin_trace_buffer *buffer,
                               uint64_t pc, enum qemu_plugin_trace_kind kind,
                               enum qemu_plugin_mem_rw rw);
+
+void plugin_register_redirect_cb(GArray **arr, uint64_t target_pc);
+
+typedef struct {
+    uint64_t start, len, offset;
+} PluginImageMap;
+
+typedef struct {
+    char *path;
+    GArray *maps; /* PluginImageMap entries. */
+} PluginImageSnapshot;
+
+bool plugin_user_image_snapshot(uint64_t image_id, PluginImageSnapshot *out);
+void plugin_user_image_snapshot_free(PluginImageSnapshot *snapshot);
 
 void exec_inline_op(enum plugin_dyn_cb_type type,
                     struct qemu_plugin_inline_cb *cb,

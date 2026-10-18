@@ -10615,7 +10615,8 @@ static void x86_cpu_set_pc(CPUState *cs, vaddr value)
 {
     X86CPU *cpu = X86_CPU(cs);
 
-    cpu->env.eip = value;
+    /* Keep set_pc/get_pc symmetric when CS has a nonzero base. */
+    cpu->env.eip = value - cpu->env.segs[R_CS].base;
 }
 
 static vaddr x86_cpu_get_pc(CPUState *cs)

@@ -155,15 +155,18 @@ static void gen_tb_edge_exit(const struct qemu_plugin_insn *insn)
         .flags = TCG_CALL_NO_RWG,
         .typemask = dh_typemask(void, 0) | dh_typemask(i32, 1) |
                     dh_typemask(i64, 2) | dh_typemask(i64, 3) |
-                    dh_typemask(i32, 4),
+                    dh_typemask(i32, 4) | dh_typemask(i32, 5) |
+                    dh_typemask(i64, 6),
     };
     TCGv_i32 cpu_index = gen_cpu_index();
 
-    tcg_gen_call4(qemu_plugin_vcpu_tb_edge_exit, &info, NULL,
+    tcg_gen_call6(qemu_plugin_vcpu_tb_edge_exit, &info, NULL,
                   tcgv_i32_temp(cpu_index),
                   tcgv_i64_temp(tcg_constant_i64(insn->vaddr)),
                   tcgv_i64_temp(tcg_constant_i64(insn->vaddr + insn->len)),
-                  tcgv_i32_temp(tcg_constant_i32(insn->properties)));
+                  tcgv_i32_temp(tcg_constant_i32(insn->properties)),
+                  tcgv_i32_temp(tcg_constant_i32(insn->has_direct_target)),
+                  tcgv_i64_temp(tcg_constant_i64(insn->direct_target)));
     tcg_temp_free_i32(cpu_index);
 }
 
@@ -172,6 +175,7 @@ static bool plugin_gen_edge_active(void)
     const unsigned long *mask = current_cpu->plugin_state->event_mask;
 
     return test_bit(QEMU_PLUGIN_EV_VCPU_TB_EDGE, mask) ||
+           test_bit(QEMU_PLUGIN_EV_VCPU_BRANCH, mask) ||
            test_bit(QEMU_PLUGIN_EV_VCPU_ROUTINE, mask);
 }
 
@@ -270,20 +274,87 @@ static void gen_inline_store_u64_cb(struct qemu_plugin_inline_cb *cb)
 
 static void gen_trace_insn_cb(const struct qemu_plugin_trace_cb *cb)
 {
-    static TCGHelperInfo info = {
+    static TCGHelperInfo record_info = {
         .flags = TCG_CALL_NO_RWG,
         .typemask = dh_typemask(void, 0) | dh_typemask(i32, 1) |
                     dh_typemask(ptr, 2) | dh_typemask(i64, 3) |
                     dh_typemask(i32, 4),
     };
+    static TCGHelperInfo flush_info = {
+        .flags = TCG_CALL_NO_RWG,
+        .typemask = dh_typemask(void, 0) | dh_typemask(ptr, 1) |
+                    dh_typemask(i32, 2),
+    };
+    struct qemu_plugin_trace_buffer *buffer = cb->buffer;
+    qemu_plugin_u64 entry = { .score = buffer->score, .offset = 0 };
+    TCGLabel *slow = gen_new_label();
+    TCGLabel *done = gen_new_label();
+    TCGv_ptr slot = tcg_temp_ebb_new_ptr();
+    TCGv_ptr records = tcg_temp_ebb_new_ptr();
+    TCGv_ptr record = tcg_temp_ebb_new_ptr();
+    TCGv_i32 used = tcg_temp_ebb_new_i32();
+    TCGv_i32 bytes = tcg_temp_ebb_new_i32();
+    TCGv_i32 in_callback = tcg_temp_ebb_new_i32();
     TCGv_i32 cpu_index = gen_cpu_index();
+    TCGv_ptr raw_slot = gen_plugin_u64_ptr(entry);
 
-    tcg_gen_call4(qemu_plugin_trace_insn_record, &info, NULL,
-                  tcgv_i32_temp(cpu_index),
-                  tcgv_ptr_temp(tcg_constant_ptr(cb->buffer)),
+    QEMU_BUILD_BUG_ON(sizeof(struct qemu_plugin_trace_record) % 8 != 0);
+    tcg_gen_mov_ptr(slot, raw_slot);
+    tcg_temp_free_ptr(raw_slot);
+    tcg_gen_ld_i32(used, slot, offsetof(struct trace_buffer_vcpu, used));
+    tcg_gen_brcondi_i32(TCG_COND_GEU, used, buffer->capacity, slow);
+    tcg_gen_ld8u_i32(in_callback, slot,
+                     offsetof(struct trace_buffer_vcpu, in_callback));
+    tcg_gen_brcondi_i32(TCG_COND_NE, in_callback, 0, slow);
+    tcg_gen_ld_ptr(records, slot,
+                   offsetof(struct trace_buffer_vcpu, records));
+    tcg_gen_brcondi_ptr(TCG_COND_EQ, records, 0, slow);
+    tcg_gen_muli_i32(bytes, used, sizeof(struct qemu_plugin_trace_record));
+    tcg_gen_ext_i32_ptr(record, bytes);
+    tcg_gen_add_ptr(record, record, records);
+    for (size_t off = 0; off < sizeof(struct qemu_plugin_trace_record);
+         off += 8) {
+        tcg_gen_st_i64(tcg_constant_i64(0), record, off);
+    }
+    tcg_gen_st_i64(tcg_constant_i64(cb->pc), record,
+                   offsetof(struct qemu_plugin_trace_record, pc));
+    tcg_gen_st_i32(tcg_constant_i32(cb->kind), record,
+                   offsetof(struct qemu_plugin_trace_record, kind));
+    tcg_gen_addi_i32(used, used, 1);
+    tcg_gen_st_i32(used, slot, offsetof(struct trace_buffer_vcpu, used));
+    tcg_gen_brcondi_i32(TCG_COND_NE, used, buffer->capacity, done);
+    tcg_gen_call2(qemu_plugin_trace_buffer_flush, &flush_info, NULL,
+                  tcgv_ptr_temp(tcg_constant_ptr(buffer)),
+                  tcgv_i32_temp(cpu_index));
+    tcg_gen_br(done);
+
+    gen_set_label(slow);
+    TCGv_i32 slow_cpu_index = gen_cpu_index();
+    tcg_gen_call4(qemu_plugin_trace_insn_record, &record_info, NULL,
+                  tcgv_i32_temp(slow_cpu_index),
+                  tcgv_ptr_temp(tcg_constant_ptr(buffer)),
                   tcgv_i64_temp(tcg_constant_i64(cb->pc)),
                   tcgv_i32_temp(tcg_constant_i32(cb->kind)));
+    tcg_temp_free_i32(slow_cpu_index);
+    gen_set_label(done);
+    tcg_temp_free_ptr(slot);
+    tcg_temp_free_ptr(records);
+    tcg_temp_free_ptr(record);
+    tcg_temp_free_i32(used);
+    tcg_temp_free_i32(bytes);
+    tcg_temp_free_i32(in_callback);
     tcg_temp_free_i32(cpu_index);
+}
+
+static void gen_redirect_cb(uint64_t target_pc)
+{
+    static TCGHelperInfo info = {
+        .flags = TCG_CALL_NO_RETURN,
+        .typemask = dh_typemask(void, 0) | dh_typemask(i64, 1),
+    };
+
+    tcg_gen_call1(qemu_plugin_redirect_pc, &info, NULL,
+                  tcgv_i64_temp(tcg_constant_i64(target_pc)));
 }
 
 static void gen_trace_mem_cb(const struct qemu_plugin_trace_cb *cb,
@@ -360,6 +431,9 @@ static void inject_cb(struct qemu_plugin_dyn_cb *cb)
         break;
     case PLUGIN_CB_TRACE_INSN:
         gen_trace_insn_cb(&cb->trace);
+        break;
+    case PLUGIN_CB_REDIRECT:
+        gen_redirect_cb(cb->redirect_pc);
         break;
     default:
         g_assert_not_reached();
@@ -549,6 +623,8 @@ bool plugin_gen_tb_start(CPUState *cpu, const DisasContextBase *db)
                   cpu->plugin_state->event_mask) &&
         !test_bit(QEMU_PLUGIN_EV_VCPU_TB_EDGE,
                   cpu->plugin_state->event_mask) &&
+        !test_bit(QEMU_PLUGIN_EV_VCPU_BRANCH,
+                  cpu->plugin_state->event_mask) &&
         !test_bit(QEMU_PLUGIN_EV_VCPU_ROUTINE,
                   cpu->plugin_state->event_mask)) {
         return false;
@@ -594,6 +670,8 @@ void plugin_gen_insn_start(CPUState *cpu, const DisasContextBase *db)
 
     tcg_ctx->plugin_insn = insn;
     insn->properties = 0;
+    insn->has_direct_target = false;
+    insn->direct_target = 0;
     insn->calls_helpers = false;
     insn->mem_helper = false;
     if (insn->insn_cbs) {
@@ -657,6 +735,24 @@ static void plugin_classify_x86(struct qemu_plugin_insn *insn,
         return;
     }
     uint8_t op = code[pos++];
+    bool rel8 = op == 0xeb || (op >= 0x70 && op <= 0x7f) ||
+                (op >= 0xe0 && op <= 0xe3);
+    bool rel32 = op == 0xe8 || op == 0xe9 ||
+                 (op == 0x0f && pos < insn->len &&
+                  code[pos] >= 0x80 && code[pos] <= 0x8f);
+
+    if (rel8 && insn->len >= pos + 1) {
+        insn->has_direct_target = true;
+        insn->direct_target = insn->vaddr + insn->len +
+                              (int8_t)code[insn->len - 1];
+    } else if (rel32 && insn->len >= pos + 4) {
+        size_t n = insn->len;
+        uint32_t raw = code[n - 4] | (uint32_t)code[n - 3] << 8 |
+                       (uint32_t)code[n - 2] << 16 |
+                       (uint32_t)code[n - 1] << 24;
+        insn->has_direct_target = true;
+        insn->direct_target = insn->vaddr + insn->len + (int32_t)raw;
+    }
     if (op == 0xe8 || op == 0x9a ||
         (op == 0xff && pos < insn->len &&
          (((code[pos] >> 3) & 7) == 2 || ((code[pos] >> 3) & 7) == 3))) {
@@ -664,11 +760,18 @@ static void plugin_classify_x86(struct qemu_plugin_insn *insn,
     } else if (op == 0xc2 || op == 0xc3 || op == 0xca || op == 0xcb) {
         insn->properties |= QEMU_PLUGIN_INSN_BRANCH | QEMU_PLUGIN_INSN_RETURN;
     } else if (op == 0xe9 || op == 0xeb || (op >= 0x70 && op <= 0x7f) ||
+               (op >= 0xe0 && op <= 0xe3) ||
                (op == 0x0f && pos < insn->len &&
                 code[pos] >= 0x80 && code[pos] <= 0x8f) ||
                (op == 0xff && pos < insn->len &&
                 (((code[pos] >> 3) & 7) == 4 || ((code[pos] >> 3) & 7) == 5))) {
         insn->properties |= QEMU_PLUGIN_INSN_BRANCH;
+    }
+    if ((op >= 0x70 && op <= 0x7f) ||
+        (op >= 0xe0 && op <= 0xe3) ||
+        (op == 0x0f && pos < insn->len &&
+         code[pos] >= 0x80 && code[pos] <= 0x8f)) {
+        insn->properties |= QEMU_PLUGIN_INSN_CONDITIONAL_BRANCH;
     }
 }
 
@@ -680,6 +783,17 @@ static void plugin_classify_aarch64(struct qemu_plugin_insn *insn,
     }
     uint32_t word = (uint32_t)code[0] | (uint32_t)code[1] << 8 |
                     (uint32_t)code[2] << 16 | (uint32_t)code[3] << 24;
+    if ((word & 0x7c000000) == 0x14000000) {
+        insn->has_direct_target = true;
+        insn->direct_target = insn->vaddr + (((int32_t)(word << 6)) >> 4);
+    } else if ((word & 0xff000010) == 0x54000000 ||
+               (word & 0x7e000000) == 0x34000000) {
+        insn->has_direct_target = true;
+        insn->direct_target = insn->vaddr + (((int32_t)(word << 8)) >> 11);
+    } else if ((word & 0x7e000000) == 0x36000000) {
+        insn->has_direct_target = true;
+        insn->direct_target = insn->vaddr + (((int32_t)(word << 13)) >> 16);
+    }
     if ((word & 0xfc000000) == 0x94000000 ||
         (word & 0xfffffc1f) == 0xd63f0000) {
         insn->properties |= QEMU_PLUGIN_INSN_BRANCH | QEMU_PLUGIN_INSN_CALL;
@@ -691,6 +805,11 @@ static void plugin_classify_aarch64(struct qemu_plugin_insn *insn,
                (word & 0x7e000000) == 0x36000000 ||
                (word & 0xfffffc1f) == 0xd61f0000) {
         insn->properties |= QEMU_PLUGIN_INSN_BRANCH;
+    }
+    if ((word & 0xff000010) == 0x54000000 ||
+        (word & 0x7e000000) == 0x34000000 ||
+        (word & 0x7e000000) == 0x36000000) {
+        insn->properties |= QEMU_PLUGIN_INSN_CONDITIONAL_BRANCH;
     }
 }
 
